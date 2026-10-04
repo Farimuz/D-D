@@ -4,7 +4,7 @@ Proyecto para crear una herramienta propia que facilite organizar y jugar partid
 
 La idea es construir una experiencia sencilla de usar tanto en PC como en teléfono, especialmente pensada para reducir el trabajo del Dungeon Master.
 
-**v0.0.1 es una mesa local experimental:** cuadrícula, fichas con nombre, movimiento con mouse o pantalla táctil, ajuste a casillas y controles de cámara. No hay backend, cuentas ni multijugador.
+**v0.0.2 es una mesa local experimental:** conserva las fichas, el arrastre y la cámara de v0.0.1 y añade importación y ajuste de mapas, medición temporal y edición/duplicado de fichas. No hay backend, cuentas ni multijugador.
 
 ## Ejecutar
 
@@ -17,9 +17,13 @@ npm run dev
 
 Abre la dirección que muestra Vite. Para probar en un teléfono en la misma red, usa la dirección `Network` del PC; el firewall debe permitir el puerto de desarrollo.
 
-Crea fichas con **＋ Ficha**, arrástralas para moverlas y arrastra el fondo para desplazar la vista. Los botones **− / ＋** ajustan el zoom y **⌖** centra la ficha seleccionada o vuelve al origen. Eliminar y limpiar requieren confirmación.
+Crea fichas con **＋ Ficha**, arrástralas para moverlas y arrastra el fondo para desplazar la vista. Selecciona una ficha para cambiar su **Nombre**, **Duplicar** o eliminarla. Los botones **− / ＋** ajustan el zoom y **⌖** centra la ficha seleccionada o vuelve al origen.
 
-Fichas, posiciones, cámara y zoom se guardan en `localStorage`, por navegador y dirección. No se comparten entre dispositivos. Si no se puede guardar, la aplicación muestra un aviso.
+Pulsa **Mapa** y elige una imagen local PNG, JPG/JPEG o WebP (máximo **25 MiB y 32 millones de píxeles**, para limitar memoria en teléfonos; SVG no se admite). En **Ajustar mapa**, arrastra la imagen y cambia la escala con **− / ＋** o el porcentaje hasta alinear sus casillas con la cuadrícula de **64 px**; pulsa **Listo** para volver a mover fichas. **Mapa** permite ajustar, reemplazar o eliminar la imagen sin borrar fichas.
+
+Activa **Medir** y arrastra entre casillas con mouse o un dedo. La distancia entre sus centros es `5 × √(Δx² + Δy²)` pies, con diferencias en casillas y una decimal cuando hace falta; no aplica reglas especiales de diagonales. La medición es temporal y **Listo** la retira. Siempre **1 casilla = 5 pies**.
+
+Fichas, cámara, zoom y referencia/posición/escala del mapa se guardan en `localStorage`; la imagen se guarda como **Blob en IndexedDB** (bytes binarios si el navegador no puede almacenar Blob), sin Base64 ni subidas. Los datos de v0.0.1 siguen siendo compatibles. Todo pertenece al navegador y dirección usados, sin compartirse entre dispositivos; borrar sus datos elimina la mesa. Si no puede guardarse una importación, se avisa y se conserva el mapa anterior. **Limpiar**, con confirmación, restablece la mesa y borra sus imágenes almacenadas; eliminar fichas o mapa también requiere confirmación.
 
 ## Producción
 
