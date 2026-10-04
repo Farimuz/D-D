@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import Board from './components/Board'
 import NameDialog from './components/NameDialog'
 import MapControls from './components/MapControls'
+import MapAlignment from './components/MapAlignment'
 import { buttonZoom, cellCenter, fitMap, nearbyCell, spawnCell } from './map/geometry'
 import { emptyBoard, MIN_ZOOM } from './state/model'
 import type { BoardMode, Point, Token } from './state/model'
@@ -21,6 +22,7 @@ export default function App() {
   const [announcement, setAnnouncement] = useState('')
   const [mode, setMode] = useState<BoardMode>('normal')
   const [mapMenu, setMapMenu] = useState(false)
+  const [aligning, setAligning] = useState(false)
   const [busy, setBusy] = useState(false)
   const [mapWarning, setMapWarning] = useState<string | null>(null)
   const processing = useRef(false)
@@ -147,12 +149,19 @@ export default function App() {
     <div className="app" onKeyDown={event => { if (event.key === 'Escape' && !creating && !renaming) { setSelectedId(null); setMode('normal'); setMapMenu(false) } }}>
       <header className="header">
         <div className="brand"><h1>D&D</h1><span>Mesa local <span className="version">· v0.0.2</span></span></div>
-        <button className="quiet" onClick={() => void reset()} disabled={gesturing || busy}>Limpiar</button>
+        <button className="quiet" onClick={() => void reset()} disabled={gesturing || busy || aligning}>Limpiar</button>
       </header>
       <main className="table">
+        {aligning && board.map && mapImage.url ? <MapAlignment map={board.map} url={mapImage.url} initialView={board} onCancel={() => setAligning(false)} onApply={(map, view) => {
+          if (!change(previous => ({ ...previous, map, ...view }), false, true)) return false
+          setAligning(false)
+          setMode('normal')
+          setAnnouncement('Cuadrícula alineada. Escala y posición guardadas.')
+          return true
+        }} /> : <>
         <Board board={board} selectedId={selectedId} onSelect={id => { setSelectedId(id); if (id) setMapMenu(false) }} onChange={change} onSize={setSize} onGesture={setGesturing} onDelete={remove} mode={mode} mapUrl={mapImage.url} disabled={busy} onDone={() => setMode('normal')} />
         <div className="map-info" aria-hidden="true">1 casilla = 5 pies</div>
-        {mode === 'map' && board.map && <div className="map-tools"><MapControls map={board.map} disabled={gesturing || busy} onDone={() => setMode('normal')} onScale={scale => change(previous => ({ ...previous, map: previous.map ? { ...previous.map, scale } : null }))} /></div>}
+        {mode === 'map' && board.map && <div className="map-tools"><MapControls map={board.map} disabled={gesturing || busy} canAlign={Boolean(mapImage.url)} onAlign={() => setAligning(true)} onDone={() => setMode('normal')} onScale={scale => change(previous => ({ ...previous, map: previous.map ? { ...previous.map, scale } : null }))} /></div>}
         {board.tokens.length === 0 && !board.map && mode === 'normal' && <div className="empty-hint"><span className="empty-symbol" aria-hidden="true">＋</span><strong>Tu mesa empieza aquí</strong><span>Crea una ficha o importa un mapa.</span></div>}
         <div className="bottom-controls">
           {(warning || mapWarning || mapImage.warning) && <p className="storage-warning" role="alert">{[warning, mapWarning, mapImage.warning].filter(Boolean).join(' ')}</p>}
@@ -189,6 +198,7 @@ export default function App() {
           </div>
           <p id="board-hint" className="board-hint">{mode === 'map' ? 'Ajustando mapa · Las fichas están bloqueadas' : mode === 'measure' ? 'Midiendo · Dos dedos para navegar' : 'Arrastra una ficha para moverla · Arrastra el fondo para explorar'}</p>
         </div>
+        </>}
       </main>
       <div className="sr-only" aria-live="polite">{announcement}</div>
       <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" aria-label="Archivo del mapa" hidden onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importMap(file) }} />
