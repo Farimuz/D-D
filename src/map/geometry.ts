@@ -42,3 +42,20 @@ export function spawnCell(tokens: Token[], camera: Point, zoom: number, size: Po
   }
   return center
 }
+
+export function nearbyCell(tokens: Token[], origin: Point): Point {
+  const occupied = new Set(tokens.map(token => `${token.x},${token.y}`))
+  // Even at a board corner this radius contains more candidates than occupied cells.
+  const radius = Math.ceil(Math.sqrt(tokens.length + 1)) + 1
+  for (let ring = 1; ring <= radius; ring++) {
+    for (let y = -ring; y <= ring; y++) {
+      for (let x = -ring; x <= ring; x++) {
+        if (Math.max(Math.abs(x), Math.abs(y)) !== ring) continue
+        const cell = { x: origin.x + x, y: origin.y + y }
+        if (Math.abs(cell.x) <= MAX_CELL && Math.abs(cell.y) <= MAX_CELL && !occupied.has(`${cell.x},${cell.y}`)) return cell
+      }
+    }
+  }
+  // The finite occupancy bound above makes this unreachable for valid board data.
+  throw new Error('No free nearby cell')
+}

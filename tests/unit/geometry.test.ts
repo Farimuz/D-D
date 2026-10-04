@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { cellCenter, clampZoom, initials, screenToWorld, snapCell, spawnCell, worldToScreen } from '../../src/map/geometry.ts'
+import { cellCenter, clampZoom, initials, nearbyCell, screenToWorld, snapCell, spawnCell, worldToScreen } from '../../src/map/geometry.ts'
 import { CELL_SIZE, emptyBoard, MAX_CELL } from '../../src/state/model.ts'
 
 test('zoom limits and nearest-cell snap cover negative coordinates', () => {
@@ -11,6 +11,19 @@ test('zoom limits and nearest-cell snap cover negative coordinates', () => {
   assert.equal(snapCell(1.49), 1)
   assert.equal(snapCell(1.51), 2)
   assert.equal(snapCell(MAX_CELL + 20), MAX_CELL)
+})
+
+test('duplicates choose an unoccupied neighbor even at board edges and in a crowded cluster', () => {
+  for (const origin of [{ x: 0, y: 0 }, { x: MAX_CELL, y: -MAX_CELL }]) {
+    const tokens = [{ id: 'a', name: 'Goblin', ...origin }]
+    for (let i = 0; i < 20; i++) {
+      const cell = nearbyCell(tokens, origin)
+      assert.ok(Math.abs(cell.x) <= MAX_CELL && Math.abs(cell.y) <= MAX_CELL)
+      assert.ok(!tokens.some(token => token.x === cell.x && token.y === cell.y))
+      assert.ok(Math.max(Math.abs(cell.x - origin.x), Math.abs(cell.y - origin.y)) <= 5)
+      tokens.push({ id: String(i), name: 'Goblin', ...cell })
+    }
+  }
 })
 
 test('world and screen coordinates round-trip after pan, at every zoom limit', () => {

@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import Board from './components/Board'
 import NameDialog from './components/NameDialog'
 import MapControls from './components/MapControls'
-import { cellCenter, clampZoom, spawnCell } from './map/geometry'
+import { cellCenter, clampZoom, nearbyCell, spawnCell } from './map/geometry'
 import { emptyBoard } from './state/model'
 import type { BoardMode, Point, Token } from './state/model'
 import { useBoard } from './state/useBoard'
@@ -15,6 +15,7 @@ export default function App() {
   const { board, warning, change, getBoard } = useBoard()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  const [renaming, setRenaming] = useState<Token | null>(null)
   const [gesturing, setGesturing] = useState(false)
   const [size, setSize] = useState<Point>({ x: 0, y: 0 })
   const [announcement, setAnnouncement] = useState('')
@@ -30,7 +31,22 @@ export default function App() {
 
   function closeDialog() {
     setCreating(false)
+    setRenaming(null)
     createButton.current?.focus()
+  }
+
+  function rename(name: string) {
+    if (!renaming) return
+    change(previous => ({ ...previous, tokens: previous.tokens.map(token => token.id === renaming.id ? { ...token, name } : token) }))
+    closeDialog()
+    setAnnouncement(`Ficha renombrada: ${name}.`)
+  }
+
+  function duplicate(token: Token) {
+    const id = newId()
+    change(previous => ({ ...previous, tokens: [...previous.tokens, { id, name: token.name, ...nearbyCell(previous.tokens, token) }] }))
+    setSelectedId(id)
+    setAnnouncement(`Ficha ${token.name} duplicada.`)
   }
 
   function create(name: string) {
@@ -140,7 +156,11 @@ export default function App() {
           </section>}
           {selected && mode === 'normal' && <section className="selection" aria-label="Ficha seleccionada">
             <div className="selection-name"><span>Ficha seleccionada</span><strong>{selected.name}</strong></div>
+            <div className="selection-actions">
+            <button onClick={() => setRenaming(selected)} disabled={gesturing || busy} aria-label={`Editar nombre de ${selected.name}`}>Nombre</button>
+            <button onClick={() => duplicate(selected)} disabled={gesturing || busy} aria-label={`Duplicar ${selected.name}`}>Duplicar</button>
             <button className="danger" onClick={() => remove(selected)} disabled={gesturing || busy} aria-label={`Eliminar ${selected.name}`}>Eliminar</button>
+            </div>
           </section>}
           <div className="toolbar" role="group" aria-label="Controles de la mesa">
             <div className="main-actions">
@@ -162,7 +182,7 @@ export default function App() {
       </main>
       <div className="sr-only" aria-live="polite">{announcement}</div>
       <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" aria-label="Archivo del mapa" hidden onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importMap(file) }} />
-      {creating && <NameDialog onCreate={create} onClose={closeDialog} />}
+      {(creating || renaming) && <NameDialog onCreate={renaming ? rename : create} onClose={closeDialog} initialName={renaming?.name} title={renaming ? 'Editar nombre' : undefined} submitLabel={renaming ? 'Guardar nombre' : undefined} />}
     </div>
   )
 }

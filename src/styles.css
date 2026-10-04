@@ -93,6 +93,10 @@ button[aria-pressed="true"]:not(.token) { border-color: #efc374; box-shadow: ins
 .selection-name { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .selection-name span { font-size: 11px; color: #c2cad6; }
 .selection-name strong { font-size: 15px; overflow-wrap: anywhere; }
+.selection { flex-wrap: wrap; gap: 8px; }
+.selection-name { width: 100%; }
+.selection-actions { display: flex; gap: 8px; width: 100%; justify-content: flex-end; }
+.selection-actions button { padding: 8px 12px; font-size: 13px; }
 .danger { color: #ffb1ab; border-color: #b76b67; background: transparent; font-size: 13px; }
 .board-hint { color: #c2cad6; font-size: 11px; text-align: center; margin: 0; background: #171c25; border-radius: 4px; padding: 4px 8px; }
 .storage-warning { width: min(540px, 100%); color: #ffe1a6; background: #453624; padding: 10px 12px; margin: 0; border: 1px solid #ac8a54; border-radius: 10px; font-size: 13px; }
