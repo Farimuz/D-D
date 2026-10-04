@@ -42,4 +42,4 @@ npm test
 npm run build
 ```
 
-Las pruebas incluyen Chrome y Edge instalados en Windows, Firefox, WebKit, vista iPhone y Android emulado con gestos táctiles. La emulación no reemplaza una prueba física en Safari/iOS o Android.
+Las pruebas usan Chrome y Edge (deben estar instalados en Windows), Firefox, WebKit, vista iPhone y Android emulado con gestos táctiles. Se ejecutan secuencialmente para evitar interferencias entre navegadores. La emulación no reemplaza una prueba física en Safari/iOS o Android.
