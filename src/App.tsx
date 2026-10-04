@@ -2,8 +2,8 @@ import { useRef, useState } from 'react'
 import Board from './components/Board'
 import NameDialog from './components/NameDialog'
 import MapControls from './components/MapControls'
-import { cellCenter, clampZoom, nearbyCell, spawnCell } from './map/geometry'
-import { emptyBoard } from './state/model'
+import { buttonZoom, cellCenter, fitMap, nearbyCell, spawnCell } from './map/geometry'
+import { emptyBoard, MIN_ZOOM } from './state/model'
 import type { BoardMode, Point, Token } from './state/model'
 import { useBoard } from './state/useBoard'
 import { newId } from './state/id'
@@ -27,6 +27,7 @@ export default function App() {
   const fileInput = useRef<HTMLInputElement>(null)
   const mapImage = useMapImage(board.map?.id)
   const createButton = useRef<HTMLButtonElement>(null)
+  const selectionHeight = useRef(140)
   const selected = board.tokens.find(token => token.id === selectedId)
 
   function closeDialog() {
@@ -98,7 +99,6 @@ export default function App() {
       committed = true
       setMode('map')
       setMapMenu(false)
-      setSelectedId(null)
       setAnnouncement('Mapa importado. Ajusta su posición y escala; después pulsa Listo.')
       if (previous.map) {
         try { await deleteMap(previous.map.id) }
@@ -134,8 +134,17 @@ export default function App() {
     change(previous => ({ ...previous, camera: selected ? cellCenter(selected) : emptyBoard().camera, zoom: 1 }))
   }
 
+  function showMap() {
+    if (!board.map) return
+    const controls = document.querySelector('.toolbar')?.getBoundingClientRect()
+    const surface = document.querySelector('.board')?.getBoundingClientRect()
+    const bottom = controls && surface ? surface.bottom - controls.top + (selected ? selectionHeight.current + 8 : 0) : 160
+    change(previous => ({ ...previous, ...fitMap(board.map!, size, previous, 48, bottom) }))
+    setMapMenu(false)
+  }
+
   return (
-    <div className="app">
+    <div className="app" onKeyDown={event => { if (event.key === 'Escape' && !creating && !renaming) { setSelectedId(null); setMode('normal'); setMapMenu(false) } }}>
       <header className="header">
         <div className="brand"><h1>D&D</h1><span>Mesa local <span className="version">· v0.0.2</span></span></div>
         <button className="quiet" onClick={() => void reset()} disabled={gesturing || busy}>Limpiar</button>
@@ -150,12 +159,13 @@ export default function App() {
           {busy && <p className="board-hint" role="status">Procesando mapa…</p>}
           {mode === 'measure' && <section className="map-panel" aria-label="Medir distancias"><div className="panel-heading"><strong>Medir</strong><button onClick={() => setMode('normal')} disabled={gesturing || busy}>Listo</button></div><p>Arrastra de una casilla a otra · 5 pies por casilla</p></section>}
           {mapMenu && board.map && mode === 'normal' && <section className="map-panel map-actions" aria-label="Opciones del mapa">
-            <button disabled={gesturing || busy} onClick={() => { setMode('map'); setMapMenu(false); setSelectedId(null) }}>Ajustar mapa</button>
+            <button disabled={gesturing || busy} onClick={() => { setMode('map'); setMapMenu(false) }}>Ajustar mapa</button>
+            <button disabled={gesturing || busy} onClick={showMap}>Ver mapa completo</button>
             <button disabled={gesturing || busy} onClick={() => fileInput.current?.click()}>Reemplazar</button>
             <button className="danger" disabled={gesturing || busy} onClick={() => void removeMap()}>Eliminar mapa</button>
           </section>}
-          {selected && mode === 'normal' && <section className="selection" aria-label="Ficha seleccionada">
-            <div className="selection-name"><span>Ficha seleccionada</span><strong>{selected.name}</strong></div>
+          {selected && mode === 'normal' && !mapMenu && <section className="selection" aria-label="Ficha seleccionada">
+            <div className="selection-heading"><div className="selection-name"><span>Ficha seleccionada</span><strong>{selected.name}</strong></div><button className="quiet" aria-label="Deseleccionar ficha" onClick={() => setSelectedId(null)} disabled={gesturing || busy}>×</button></div>
             <div className="selection-actions">
               <button onClick={() => setRenaming(selected)} disabled={gesturing || busy} aria-label={`Editar nombre de ${selected.name}`}>Nombre</button>
               <button onClick={() => duplicate(selected)} disabled={gesturing || busy} aria-label={`Duplicar ${selected.name}`}>Duplicar</button>
@@ -165,19 +175,19 @@ export default function App() {
           <div className="toolbar" role="group" aria-label="Controles de la mesa">
             <div className="main-actions">
               <button ref={createButton} className="primary create-button" onClick={() => { setMode('normal'); setMapMenu(false); setCreating(true) }} disabled={gesturing || busy}>＋ Ficha</button>
-              <button aria-pressed={mapMenu || mode === 'map'} onClick={() => { if (board.map) { setMode('normal'); setSelectedId(null); setMapMenu(!mapMenu) } else fileInput.current?.click() }} disabled={gesturing || busy}>Mapa</button>
-              <button aria-pressed={mode === 'measure'} onClick={() => { setMode(mode === 'measure' ? 'normal' : 'measure'); setMapMenu(false); setSelectedId(null) }} disabled={gesturing || busy}>Medir</button>
+              <button aria-pressed={mapMenu || mode === 'map'} onClick={() => { if (board.map) { selectionHeight.current = document.querySelector('.selection')?.getBoundingClientRect().height ?? selectionHeight.current; setMode('normal'); setMapMenu(!mapMenu) } else fileInput.current?.click() }} disabled={gesturing || busy}>Mapa</button>
+              <button aria-pressed={mode === 'measure'} onClick={() => { setMode(mode === 'measure' ? 'normal' : 'measure'); setMapMenu(false) }} disabled={gesturing || busy}>Medir</button>
             </div>
             <div className="camera-actions">
               <div className="zoom-controls" role="group" aria-label="Zoom">
-                <button aria-label="Alejar" onClick={() => change(previous => ({ ...previous, zoom: clampZoom(Number((previous.zoom - 0.25).toFixed(2))) }))} disabled={gesturing || busy || board.zoom <= 0.5}>−</button>
-                <output aria-label="Nivel de zoom">{Math.round(board.zoom * 100)}%</output>
-                <button aria-label="Acercar" onClick={() => change(previous => ({ ...previous, zoom: clampZoom(Number((previous.zoom + 0.25).toFixed(2))) }))} disabled={gesturing || busy || board.zoom >= 2.5}>＋</button>
+                <button aria-label="Alejar" onClick={() => change(previous => ({ ...previous, zoom: buttonZoom(previous.zoom, -1) }))} disabled={gesturing || busy || board.zoom <= MIN_ZOOM}>−</button>
+                <output aria-label="Nivel de zoom">{board.zoom < 0.00001 ? '<0.001' : Number((board.zoom * 100).toFixed(3))}%</output>
+                <button aria-label="Acercar" onClick={() => change(previous => ({ ...previous, zoom: buttonZoom(previous.zoom, 1) }))} disabled={gesturing || busy || board.zoom >= 2.5}>＋</button>
               </div>
               <button className="center-button" aria-label="Centrar vista" title="Centrar la ficha seleccionada o volver al inicio · 100%" onClick={center} disabled={gesturing || busy}>⌖</button>
             </div>
           </div>
-          <p id="board-hint" className="board-hint">{mode === 'map' ? 'Ajustando mapa · Las fichas están bloqueadas' : mode === 'measure' ? 'Midiendo · Las fichas y la cámara están bloqueadas' : 'Arrastra una ficha para moverla · Arrastra el fondo para explorar'}</p>
+          <p id="board-hint" className="board-hint">{mode === 'map' ? 'Ajustando mapa · Las fichas están bloqueadas' : mode === 'measure' ? 'Midiendo · Dos dedos para navegar' : 'Arrastra una ficha para moverla · Arrastra el fondo para explorar'}</p>
         </div>
       </main>
       <div className="sr-only" aria-live="polite">{announcement}</div>

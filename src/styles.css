@@ -54,14 +54,21 @@ button:focus-visible, input:focus-visible, .board:focus-visible { outline: 3px s
 .board.dragging { cursor: grabbing; }
 .board:focus-visible { outline-offset: -4px; }
 .token {
-  z-index: 3;
-  position: absolute; transform: translate(-50%, -50%); border: 2px solid #ffe0a0;
-  background: #9a641f; color: #fff8e8; border-radius: 50%; padding: 0; font-weight: 750;
-  line-height: 1; box-shadow: 0 2px 8px #0006; cursor: grab; touch-action: none;
+  z-index: 3; position: absolute; transform: translate(-50%, -50%);
+  min-width: 12px; min-height: 12px; border: 0; background: transparent;
+  padding: 0; display: grid; place-items: center; cursor: grab; touch-action: none;
 }
-.token:active { background: #9a641f; cursor: grabbing; }
-.token.selected { outline: 3px solid #f4f6fa; outline-offset: 3px; z-index: 4; }
-.token:focus-visible { outline: 3px solid #a0d6ff; outline-offset: 5px; }
+.token-face {
+  width: var(--token-size); height: var(--token-size); border: min(2px, calc(var(--token-size) / 8)) solid #ffe0a0;
+  background: #9a641f; color: #fff8e8; border-radius: 50%; font-weight: 750;
+  line-height: 1; box-shadow: 0 2px 8px #0006; display: grid; place-items: center; pointer-events: none;
+}
+.token:active { background: transparent; cursor: grabbing; }
+.token.selected { z-index: 4; }
+.token.selected .token-face { outline: min(3px, calc(var(--token-size) / 4)) solid #f4f6fa; outline-offset: min(3px, calc(var(--token-size) / 4)); }
+.token:focus-visible { outline: none; }
+.token:focus-visible .token-face { outline: 3px solid #a0d6ff; outline-offset: 5px; }
+@media (pointer: coarse) { .token { min-width: 44px; min-height: 44px; } }
 .map-info { position: absolute; top: 14px; left: max(16px, env(safe-area-inset-left)); padding: 6px 10px; border-radius: 6px; font-size: 12px; background: #171c25; color: #c2cad6; pointer-events: none; }
 .empty-hint { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); width: min(280px, 90%); display: flex; align-items: center; flex-direction: column; gap: 8px; pointer-events: none; text-align: center; background: #1b222dec; padding: 20px; border-radius: 16px; }
 .empty-symbol { color: #f0c77e; font-size: 34px; }
@@ -96,7 +103,8 @@ button[aria-pressed="true"]:not(.token) { border-color: #efc374; box-shadow: ins
 .selection-name span { font-size: 11px; color: #c2cad6; }
 .selection-name strong { font-size: 15px; overflow-wrap: anywhere; }
 .selection { flex-wrap: wrap; gap: 8px; }
-.selection-name { width: 100%; }
+.selection-heading { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.selection-heading .quiet { flex-shrink: 0; padding: 4px; font-size: 24px; }
 .selection-actions { display: flex; gap: 8px; width: 100%; justify-content: flex-end; }
 .selection-actions button { padding: 8px 12px; font-size: 13px; }
 .danger { color: #ffb1ab; border-color: #b76b67; background: transparent; font-size: 13px; }
