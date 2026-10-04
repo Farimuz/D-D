@@ -1,4 +1,5 @@
 import type { MapAsset, Point } from '../state/model.ts'
+import { MAX_CAMERA } from '../state/model.ts'
 
 export const MAX_IMAGE_BYTES = 25 * 1024 * 1024
 export const MAX_IMAGE_PIXELS = 32_000_000
@@ -18,7 +19,8 @@ export function clampMapScale(value: number): number {
 
 export function initialMap(id: string, width: number, height: number, camera: Point, zoom: number, size: Point): MapAsset {
   const scale = clampMapScale(Math.min(1, Math.max(64, size.x - 64) / zoom / width, Math.max(64, size.y - 240) / zoom / height))
-  return { id, width, height, scale, x: camera.x - width * scale / 2, y: camera.y - height * scale / 2 }
+  const limit = (value: number) => Math.max(-MAX_CAMERA, Math.min(MAX_CAMERA, value))
+  return { id, width, height, scale, x: limit(camera.x - width * scale / 2), y: limit(camera.y - height * scale / 2) }
 }
 
 export async function validateImage(file: Blob): Promise<{ blob: Blob; width: number; height: number }> {

@@ -39,18 +39,22 @@ button:focus-visible, input:focus-visible, .board:focus-visible { outline: 3px s
 .board {
   position: absolute; inset: 0; overflow: clip; touch-action: none; user-select: none; -webkit-user-select: none;
   background-color: #1b222d;
-  background-image: linear-gradient(to right, #3c4655 1px, transparent 1px), linear-gradient(to bottom, #3c4655 1px, transparent 1px);
   cursor: grab;
 }
+.map-image { position: absolute; z-index: 0; pointer-events: none; max-width: none; }
+.grid { position: absolute; inset: 0; z-index: 1; pointer-events: none; background-image: linear-gradient(to right, #3c4655 1px, transparent 1px), linear-gradient(to bottom, #3c4655 1px, transparent 1px); }
+.grid.over-map { background-image: linear-gradient(to right, #ffffffb3 1px, #0008 1px, #0008 2px, transparent 2px), linear-gradient(to bottom, #ffffffb3 1px, #0008 1px, #0008 2px, transparent 2px); }
+.board.adjusting { outline: 3px solid #efc374; outline-offset: -3px; }
 .board.dragging { cursor: grabbing; }
 .board:focus-visible { outline-offset: -4px; }
 .token {
+  z-index: 3;
   position: absolute; transform: translate(-50%, -50%); border: 2px solid #ffe0a0;
   background: #9a641f; color: #fff8e8; border-radius: 50%; padding: 0; font-weight: 750;
   line-height: 1; box-shadow: 0 2px 8px #0006; cursor: grab; touch-action: none;
 }
 .token:active { background: #9a641f; cursor: grabbing; }
-.token.selected { outline: 3px solid #f4f6fa; outline-offset: 3px; z-index: 1; }
+.token.selected { outline: 3px solid #f4f6fa; outline-offset: 3px; z-index: 4; }
 .token:focus-visible { outline: 3px solid #a0d6ff; outline-offset: 5px; }
 .map-info { position: absolute; top: 14px; left: max(16px, env(safe-area-inset-left)); padding: 6px 10px; border-radius: 6px; font-size: 12px; background: #171c25; color: #c2cad6; pointer-events: none; }
 .empty-hint { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); width: min(280px, 90%); display: flex; align-items: center; flex-direction: column; gap: 8px; pointer-events: none; text-align: center; background: #1b222dec; padding: 20px; border-radius: 16px; }
@@ -58,7 +62,19 @@ button:focus-visible, input:focus-visible, .board:focus-visible { outline: 3px s
 .empty-hint strong { font-size: 18px; }
 .empty-hint > span:last-child { font-size: 14px; color: #c2cad6; }
 .bottom-controls { position: absolute; bottom: 0; left: 0; right: 0; display: flex; align-items: center; flex-direction: column; gap: 8px; padding: 12px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); pointer-events: none; }
-.bottom-controls button, .selection, .toolbar, .storage-warning { pointer-events: auto; }
+.bottom-controls { z-index: 10; }
+.map-info, .empty-hint { z-index: 10; }
+.bottom-controls button, .selection, .toolbar, .storage-warning, .map-panel { pointer-events: auto; }
+.main-actions, .camera-actions { display: flex; gap: 8px; align-items: center; }
+.map-panel { width: min(430px, 100%); padding: 10px 12px; border: 1px solid #efc374; border-radius: 12px; background: #171c25; }
+.panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.map-panel p { font-size: 12px; color: #c2cad6; margin: 4px 0 8px; }
+.map-scale { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.map-scale label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.map-scale input { width: 100px; min-height: 44px; padding: 8px; border: 1px solid #707d91; border-radius: 8px; font-size: 16px; background: #151c26; color: #edf0f5; }
+.map-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.map-actions button { padding: 8px; font-size: 13px; }
+button[aria-pressed="true"]:not(.token) { border-color: #efc374; box-shadow: inset 0 0 0 1px #efc374; }
 .toolbar { display: flex; align-items: center; gap: 10px; padding: 8px; border: 1px solid #4b5667; border-radius: 14px; background: #171c25; box-shadow: 0 4px 20px #0005; max-width: 100%; }
 .primary { background: #efc374; border-color: #efc374; color: #261d10; font-weight: 700; }
 .primary:active { background: #ffda94; }
@@ -87,6 +103,11 @@ button:focus-visible, input:focus-visible, .board:focus-visible { outline: 3px s
   .toolbar { gap: 6px; padding: 6px; }
   .create-button { min-width: 96px; padding: 10px; }
   .board-hint { font-size: 10px; }
+}
+@media (max-width: 560px) {
+  .toolbar { flex-direction: column; gap: 4px; }
+  .main-actions { width: 100%; justify-content: center; }
+  .camera-actions { justify-content: center; }
 }
 @media (max-height: 480px) {
   .board-hint { display: none; }
