@@ -73,6 +73,8 @@ button:focus-visible, input:focus-visible, .board:focus-visible { outline: 3px s
 .bottom-controls button, .selection, .toolbar, .storage-warning, .map-panel { pointer-events: auto; }
 .main-actions, .camera-actions { display: flex; gap: 8px; align-items: center; }
 .map-panel { width: min(430px, 100%); padding: 10px 12px; border: 1px solid #efc374; border-radius: 12px; background: #171c25; }
+.map-tools { position: absolute; top: 14px; left: 12px; right: 12px; display: flex; justify-content: center; pointer-events: none; z-index: 10; }
+.map-tools .map-panel { pointer-events: auto; }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .map-panel p { font-size: 12px; color: #c2cad6; margin: 4px 0 8px; }
 .map-scale { display: flex; align-items: center; justify-content: center; gap: 8px; }
@@ -115,6 +117,7 @@ button[aria-pressed="true"]:not(.token) { border-color: #efc374; box-shadow: ins
   .board-hint { font-size: 10px; }
 }
 @media (max-width: 560px) {
+  .map-tools { top: 50px; }
   .toolbar { flex-direction: column; gap: 4px; }
   .main-actions { width: 100%; justify-content: center; }
   .camera-actions { justify-content: center; }

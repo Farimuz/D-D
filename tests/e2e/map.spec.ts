@@ -13,7 +13,7 @@ const test = base.extend<{ cleanConsole: void }>({
 })
 
 async function saved(page: Page): Promise<BoardState> { return page.evaluate(() => JSON.parse(localStorage.getItem('dnd.local-board.v1')!)) }
-async function assets(page: Page): Promise<{ id: string; size: number; type: string; blob: boolean }[]> {
+async function assets(page: Page): Promise<{ id: string; size: number; type: string; format: 'blob' | 'binary' }[]> {
   return page.evaluate(() => new Promise((resolve, reject) => {
     const request = indexedDB.open('dnd.local-maps', 1)
     request.onsuccess = () => {
@@ -22,7 +22,7 @@ async function assets(page: Page): Promise<{ id: string; size: number; type: str
       const store = tx.objectStore('assets')
       const keys = store.getAllKeys()
       const values = store.getAll()
-      tx.oncomplete = () => { db.close(); resolve(values.result.map((value: Blob, i) => ({ id: String(keys.result[i]), size: value.size, type: value.type, blob: value instanceof Blob }))) }
+      tx.oncomplete = () => { db.close(); resolve(values.result.map((value: Blob | { bytes: ArrayBuffer; type: string }, i) => ({ id: String(keys.result[i]), size: value instanceof Blob ? value.size : value.bytes.byteLength, type: value.type, format: value instanceof Blob ? 'blob' : 'binary' }))) }
       tx.onabort = () => { db.close(); reject(tx.error) }
     }
     request.onerror = () => reject(request.error)
@@ -79,7 +79,9 @@ test('map imports PNG/JPEG/WebP by content, preserves aspect and replaces the ol
     expect(box.width / box.height).toBeCloseTo(512 / 320, 3)
     const stored = await assets(page)
     expect(stored).toHaveLength(1)
-    expect(stored[0]).toMatchObject({ id: board.map!.id, type, blob: true })
+    expect(stored[0]).toMatchObject({ id: board.map!.id, type })
+    expect(['blob', 'binary']).toContain(stored[0].format)
+    expect(stored[0].size).toBeGreaterThan(0)
     expect(board.tokens[0]).toEqual(token)
     expect(await page.evaluate(() => localStorage.getItem('dnd.local-board.v1'))).not.toContain('base64')
     await page.getByRole('button', { name: 'Listo', exact: true }).click()
@@ -208,4 +210,237 @@ test('measurement uses correct horizontal and vertical distances at camera zoom 
   await expect(page.locator('.measurement')).toHaveCount(0)
   await page.reload()
   await expect(page.locator('.measurement')).toHaveCount(0)
+})
+
+test('rename validates the name and duplicate keeps it with a fresh identity and free nearby cell', async ({ page }) => {
+  await create(page, 'Goblin')
+  const original = (await saved(page)).tokens[0]
+  await page.getByRole('button', { name: 'Editar nombre de Goblin', exact: true }).click()
+  await expect(page.getByLabel('Nombre', { exact: true })).toHaveValue('Goblin')
+  await page.getByLabel('Nombre', { exact: true }).fill('   ')
+  await expect(page.getByRole('button', { name: 'Guardar nombre', exact: true })).toBeDisabled()
+  await page.getByLabel('Nombre', { exact: true }).fill('Goblin rojo')
+  await page.getByRole('button', { name: 'Guardar nombre', exact: true }).click()
+  expect((await saved(page)).tokens[0]).toEqual({ ...original, name: 'Goblin rojo' })
+  await page.getByRole('button', { name: 'Duplicar Goblin rojo', exact: true }).click()
+  const tokens = (await saved(page)).tokens
+  expect(tokens).toHaveLength(2)
+  expect(tokens[1].name).toBe('Goblin rojo')
+  expect(tokens[1].id).not.toBe(tokens[0].id)
+  expect({ x: tokens[1].x, y: tokens[1].y }).not.toEqual({ x: tokens[0].x, y: tokens[0].y })
+  expect(Math.max(Math.abs(tokens[1].x - tokens[0].x), Math.abs(tokens[1].y - tokens[0].y))).toBe(1)
+  await page.reload()
+  expect((await saved(page)).tokens).toEqual(tokens)
+  await expect(page.getByRole('button', { name: 'Ficha Goblin rojo', exact: true })).toHaveCount(2)
+})
+
+test('failed metadata writes cannot replace, delete or reset a durable map asset', async ({ page }) => {
+  await create(page, 'Persistente'); await importMap(page)
+  await page.getByRole('button', { name: 'Listo', exact: true }).click()
+  const before = await saved(page)
+  const stored = await assets(page)
+  await page.evaluate(() => { Storage.prototype.setItem = () => { throw new DOMException('Quota', 'QuotaExceededError') } })
+  await page.getByLabel('Archivo del mapa', { exact: true }).setInputFiles(await mapFile(page))
+  await expect(page.getByRole('button', { name: '＋ Ficha', exact: true })).toBeEnabled()
+  await expect(page.getByRole('alert')).toContainText('mapa anterior se conservó')
+  expect(await saved(page)).toEqual(before)
+  expect(await assets(page)).toEqual(stored)
+  await page.getByRole('button', { name: 'Mapa', exact: true }).click()
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: 'Eliminar mapa', exact: true }).click()
+  expect(await saved(page)).toEqual(before)
+  expect(await assets(page)).toEqual(stored)
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: 'Limpiar', exact: true }).click()
+  expect(await saved(page)).toEqual(before)
+  expect(await assets(page)).toEqual(stored)
+  await page.reload()
+  await expect(page.getByRole('img', { name: 'Mapa importado' })).toBeVisible()
+})
+
+test('unavailable or missing image storage warns without losing tokens or saved metadata', async ({ page }) => {
+  await create(page, 'Conservada'); await importMap(page)
+  await page.getByRole('button', { name: 'Listo', exact: true }).click()
+  const before = await saved(page)
+  await page.evaluate(() => { IDBFactory.prototype.open = () => { throw new DOMException('Denied', 'SecurityError') } })
+  await page.getByLabel('Archivo del mapa', { exact: true }).setInputFiles(await mapFile(page))
+  await expect(page.getByRole('button', { name: '＋ Ficha', exact: true })).toBeEnabled()
+  await expect(page.getByRole('alert')).toBeVisible()
+  expect(await saved(page)).toEqual(before)
+  await page.reload()
+  await expect(page.getByRole('img', { name: 'Mapa importado' })).toBeVisible()
+  await page.evaluate(() => new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open('dnd.local-maps', 1)
+    request.onsuccess = () => {
+      const db = request.result; const tx = db.transaction('assets', 'readwrite'); tx.objectStore('assets').clear()
+      tx.oncomplete = () => { db.close(); resolve() }; tx.onabort = () => { db.close(); reject(tx.error) }
+    }
+  }))
+  await page.reload()
+  await expect(page.getByRole('alert')).toContainText('Las fichas se conservaron')
+  await expect(page.getByRole('button', { name: 'Ficha Conservada', exact: true })).toBeVisible()
+  expect(await saved(page)).toEqual(before)
+})
+
+test('map gesture interruptions roll back and object URLs are released on replace and delete', async ({ page }) => {
+  await page.evaluate(() => {
+    const active = new Set<string>()
+    const create = URL.createObjectURL.bind(URL); const revoke = URL.revokeObjectURL.bind(URL)
+    URL.createObjectURL = blob => { const url = create(blob); active.add(url); return url }
+    URL.revokeObjectURL = url => { active.delete(url); revoke(url) }
+    Object.assign(window, { activeMapUrls: active })
+  })
+  await importMap(page)
+  await expect.poll(() => page.evaluate(() => (window as unknown as { activeMapUrls: Set<string> }).activeMapUrls.size)).toBe(1)
+  const before = await saved(page)
+  const image = (await page.getByRole('img', { name: 'Mapa importado' }).boundingBox())!
+  const start = { x: image.x + image.width / 2, y: image.y + image.height / 2 }
+  await page.mouse.move(start.x, start.y); await page.mouse.down(); await page.mouse.move(start.x + 40, start.y - 20)
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')))
+  await page.mouse.up()
+  expect(await saved(page)).toEqual(before)
+  await page.getByRole('button', { name: 'Listo', exact: true }).click()
+  await importMap(page)
+  await expect.poll(() => page.evaluate(() => (window as unknown as { activeMapUrls: Set<string> }).activeMapUrls.size)).toBe(1)
+  await page.getByRole('button', { name: 'Listo', exact: true }).click()
+  await page.getByRole('button', { name: 'Mapa', exact: true }).click()
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: 'Eliminar mapa', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as unknown as { activeMapUrls: Set<string> }).activeMapUrls.size)).toBe(0)
+})
+
+test('map and measurement controls fit narrow portrait and landscape viewports with touch-sized targets', async ({ page }) => {
+  await importMap(page)
+  for (const size of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 844, height: 390 }]) {
+    await page.setViewportSize(size)
+    for (const label of ['Mapa', 'Medir', 'Listo', 'Aumentar escala del mapa', 'Disminuir escala del mapa']) {
+      const box = (await page.getByRole('button', { name: label, exact: true }).boundingBox())!
+      expect(box.width).toBeGreaterThanOrEqual(44); expect(box.height).toBeGreaterThanOrEqual(44)
+      expect(box.x).toBeGreaterThanOrEqual(0); expect(box.y).toBeGreaterThanOrEqual(0)
+      expect(box.x + box.width).toBeLessThanOrEqual(size.width); expect(box.y + box.height).toBeLessThanOrEqual(size.height)
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    const start = await middle(page.locator('.board'))
+    expect(await page.evaluate(point => Boolean(document.elementFromPoint(point.x, point.y)?.closest('.board')), start)).toBe(true)
+    const before = await saved(page)
+    await drag(page, start, 12, 0)
+    expect((await saved(page)).map!.x).toBeCloseTo(before.map!.x + 12 / before.zoom, 4)
+    await page.screenshot({ path: `test-results/map-adjust-${size.width}-${test.info().project.name}.png` })
+  }
+})
+
+test('mobile tap imports and aligns a map, then uses tokens, camera and synthetic touch measurement', async ({ page }) => {
+  const chooser = page.waitForEvent('filechooser')
+  await page.getByRole('button', { name: 'Mapa', exact: true }).tap()
+  await (await chooser).setFiles(await mapFile(page))
+  await expect(page.getByRole('img', { name: 'Mapa importado' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Listo', exact: true })).toBeEnabled()
+  const before = await saved(page)
+  // WebKit provides tap automation; synthetic touch PointerEvents exercise drag handlers on iPhone.
+  async function touch(start: { x: number; y: number }, dx: number, dy: number) {
+    await page.evaluate(({ start, dx, dy }) => {
+      const board = document.querySelector<HTMLElement>('.board')!
+      const capture = board.setPointerCapture; const has = board.hasPointerCapture
+      board.setPointerCapture = () => {}; board.hasPointerCapture = () => false
+      try {
+        const target = document.elementFromPoint(start.x, start.y)!
+        const event = (type: string, x: number, y: number) => new PointerEvent(type, { bubbles: true, pointerId: 42, pointerType: 'touch', isPrimary: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: y })
+        target.dispatchEvent(event('pointerdown', start.x, start.y))
+        board.dispatchEvent(event('pointermove', start.x + dx, start.y + dy))
+        board.dispatchEvent(event('pointerup', start.x + dx, start.y + dy))
+      } finally { board.setPointerCapture = capture; board.hasPointerCapture = has }
+    }, { start, dx, dy })
+  }
+  const image = (await page.getByRole('img', { name: 'Mapa importado' }).boundingBox())!
+  await touch({ x: image.x + image.width / 2, y: image.y + image.height / 2 }, 30, -20)
+  expect((await saved(page)).map).toMatchObject({ x: before.map!.x + 30, y: before.map!.y - 20 })
+  await page.getByRole('button', { name: 'Aumentar escala del mapa', exact: true }).tap()
+  await page.getByRole('button', { name: 'Disminuir escala del mapa', exact: true }).tap()
+  await page.getByRole('button', { name: 'Listo', exact: true }).tap()
+  await page.getByRole('button', { name: '＋ Ficha', exact: true }).tap()
+  await page.getByLabel('Nombre', { exact: true }).fill('Móvil')
+  await page.getByRole('button', { name: 'Crear ficha', exact: true }).tap()
+  const token = page.getByRole('button', { name: 'Ficha Móvil', exact: true })
+  await touch(await middle(token), 64, -64)
+  expect((await saved(page)).tokens[0]).toMatchObject({ x: 1, y: -1 })
+  const cameraBefore = (await saved(page)).camera
+  const boardBox = (await page.locator('.board').boundingBox())!
+  await touch({ x: 30, y: boardBox.y + 100 }, 30, 20)
+  expect((await saved(page)).camera).toEqual({ x: cameraBefore.x - 30, y: cameraBefore.y - 20 })
+  await page.getByRole('button', { name: 'Acercar', exact: true }).tap()
+  await page.getByRole('button', { name: 'Centrar vista', exact: true }).tap()
+  for (let i = 0; i < 2; i++) await page.getByRole('button', { name: 'Alejar', exact: true }).tap()
+  await page.getByRole('button', { name: 'Medir', exact: true }).tap()
+  const measurementBefore = await saved(page)
+  const start = await middle(token)
+  await touch(start, -128, 0)
+  await expect(page.getByLabel('Distancia', { exact: true })).toHaveText('20 ft')
+  await touch(start, 0, -192)
+  await expect(page.getByLabel('Distancia', { exact: true })).toHaveText('30 ft')
+  expect(await saved(page)).toEqual(measurementBefore)
+  await page.getByRole('button', { name: 'Listo', exact: true }).tap()
+  await page.reload()
+  await expect(page.getByRole('img', { name: 'Mapa importado' })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: `test-results/mobile-map-${test.info().project.name}.png` })
+})
+
+test('Android trusted touch adjusts maps and measures without moving tokens or camera', async ({ page, browserName }) => {
+  expect(browserName).toBe('chromium')
+  await create(page, 'Táctil'); await importMap(page)
+  const client = await page.context().newCDPSession(page)
+  async function touch(start: { x: number; y: number }, dx: number, dy: number, cancel = false) {
+    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 0, ...start }] })
+    for (let i = 1; i <= 5; i++) await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ id: 0, x: start.x + dx * i / 5, y: start.y + dy * i / 5 }] })
+    await client.send('Input.dispatchTouchEvent', { type: cancel ? 'touchCancel' : 'touchEnd', touchPoints: [] })
+  }
+  const token = page.getByRole('button', { name: 'Ficha Táctil', exact: true })
+  const before = await saved(page)
+  const start = await middle(token)
+  await touch(start, 40, -30)
+  const moved = await saved(page)
+  expect(moved.map).toMatchObject({ x: before.map!.x + 40, y: before.map!.y - 30 })
+  expect(moved.tokens).toEqual(before.tokens); expect(moved.camera).toEqual(before.camera)
+  await touch(start, 70, -30, true)
+  expect(await saved(page)).toEqual(moved)
+  await page.getByRole('button', { name: 'Aumentar escala del mapa', exact: true }).tap()
+  await page.getByRole('button', { name: 'Listo', exact: true }).tap()
+  await touch(start, 64, -64)
+  expect((await saved(page)).tokens[0]).toMatchObject({ x: 1, y: -1 })
+  const box = (await page.locator('.board').boundingBox())!
+  await touch({ x: 30, y: box.y + 100 }, 30, 20)
+  await page.getByRole('button', { name: 'Acercar', exact: true }).tap()
+  await page.getByRole('button', { name: 'Centrar vista', exact: true }).tap()
+  for (let i = 0; i < 2; i++) await page.getByRole('button', { name: 'Alejar', exact: true }).tap()
+  await page.getByRole('button', { name: 'Medir', exact: true }).tap()
+  const measurementBefore = await saved(page)
+  const origin = await middle(token)
+  await touch(origin, -128, 0)
+  await expect(page.getByLabel('Distancia', { exact: true })).toHaveText('20 ft')
+  await touch(origin, 0, -192)
+  await expect(page.getByLabel('Distancia', { exact: true })).toHaveText('30 ft')
+  expect(await saved(page)).toEqual(measurementBefore)
+  await touch(origin, -128, 0, true)
+  await expect(page.locator('.measurement')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Listo', exact: true }).tap()
+  await page.reload()
+  await expect(page.getByRole('img', { name: 'Mapa importado' })).toBeVisible()
+  expect(await saved(page)).toEqual(measurementBefore)
+  await client.detach()
+})
+
+test('unsupported Blob cloning falls back to local binary bytes and restores after reload', async ({ page }) => {
+  await page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put
+    IDBObjectStore.prototype.put = function(value, key) {
+      if (value instanceof Blob) throw new DOMException('Error preparing Blob/File data', 'UnknownError')
+      return put.call(this, value, key)
+    }
+  })
+  await importMap(page)
+  const before = await saved(page)
+  expect((await assets(page))[0].format).toBe('binary')
+  await page.reload()
+  await expect(page.getByRole('img', { name: 'Mapa importado' })).toBeVisible()
+  expect(await saved(page)).toEqual(before)
 })

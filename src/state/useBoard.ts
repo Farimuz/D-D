@@ -29,7 +29,10 @@ export function useBoard() {
       setWarning('El navegador no permite guardar. Los cambios durarán solo mientras esta página esté abierta.')
     }
     // Do not remove/replace an asset until its new reference is durably saved.
-    if (requireStorage && !saved) return false
+    if (requireStorage && !saved) {
+      setWarning('No se pudo guardar la mesa. La operación del mapa no se aplicó; la mesa anterior se conservó.')
+      return false
+    }
     if (resetStorage) blocked.current = false
     current.current = next
     setBoard(next)

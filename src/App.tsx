@@ -143,11 +143,11 @@ export default function App() {
       <main className="table">
         <Board board={board} selectedId={selectedId} onSelect={id => { setSelectedId(id); if (id) setMapMenu(false) }} onChange={change} onSize={setSize} onGesture={setGesturing} onDelete={remove} mode={mode} mapUrl={mapImage.url} disabled={busy} onDone={() => setMode('normal')} />
         <div className="map-info" aria-hidden="true">1 casilla = 5 pies</div>
+        {mode === 'map' && board.map && <div className="map-tools"><MapControls map={board.map} disabled={gesturing || busy} onDone={() => setMode('normal')} onScale={scale => change(previous => ({ ...previous, map: previous.map ? { ...previous.map, scale } : null }))} /></div>}
         {board.tokens.length === 0 && !board.map && mode === 'normal' && <div className="empty-hint"><span className="empty-symbol" aria-hidden="true">＋</span><strong>Tu mesa empieza aquí</strong><span>Crea una ficha o importa un mapa.</span></div>}
         <div className="bottom-controls">
           {(warning || mapWarning || mapImage.warning) && <p className="storage-warning" role="alert">{[warning, mapWarning, mapImage.warning].filter(Boolean).join(' ')}</p>}
           {busy && <p className="board-hint" role="status">Procesando mapa…</p>}
-          {mode === 'map' && board.map && <MapControls map={board.map} disabled={gesturing || busy} onDone={() => setMode('normal')} onScale={scale => change(previous => ({ ...previous, map: previous.map ? { ...previous.map, scale } : null }))} />}
           {mode === 'measure' && <section className="map-panel" aria-label="Medir distancias"><div className="panel-heading"><strong>Medir</strong><button onClick={() => setMode('normal')} disabled={gesturing || busy}>Listo</button></div><p>Arrastra de una casilla a otra · 5 pies por casilla</p></section>}
           {mapMenu && board.map && mode === 'normal' && <section className="map-panel map-actions" aria-label="Opciones del mapa">
             <button disabled={gesturing || busy} onClick={() => { setMode('map'); setMapMenu(false); setSelectedId(null) }}>Ajustar mapa</button>
@@ -157,9 +157,9 @@ export default function App() {
           {selected && mode === 'normal' && <section className="selection" aria-label="Ficha seleccionada">
             <div className="selection-name"><span>Ficha seleccionada</span><strong>{selected.name}</strong></div>
             <div className="selection-actions">
-            <button onClick={() => setRenaming(selected)} disabled={gesturing || busy} aria-label={`Editar nombre de ${selected.name}`}>Nombre</button>
-            <button onClick={() => duplicate(selected)} disabled={gesturing || busy} aria-label={`Duplicar ${selected.name}`}>Duplicar</button>
-            <button className="danger" onClick={() => remove(selected)} disabled={gesturing || busy} aria-label={`Eliminar ${selected.name}`}>Eliminar</button>
+              <button onClick={() => setRenaming(selected)} disabled={gesturing || busy} aria-label={`Editar nombre de ${selected.name}`}>Nombre</button>
+              <button onClick={() => duplicate(selected)} disabled={gesturing || busy} aria-label={`Duplicar ${selected.name}`}>Duplicar</button>
+              <button className="danger" onClick={() => remove(selected)} disabled={gesturing || busy} aria-label={`Eliminar ${selected.name}`}>Eliminar</button>
             </div>
           </section>}
           <div className="toolbar" role="group" aria-label="Controles de la mesa">
@@ -169,12 +169,12 @@ export default function App() {
               <button aria-pressed={mode === 'measure'} onClick={() => { setMode(mode === 'measure' ? 'normal' : 'measure'); setMapMenu(false); setSelectedId(null) }} disabled={gesturing || busy}>Medir</button>
             </div>
             <div className="camera-actions">
-            <div className="zoom-controls" role="group" aria-label="Zoom">
-              <button aria-label="Alejar" onClick={() => change(previous => ({ ...previous, zoom: clampZoom(Number((previous.zoom - 0.25).toFixed(2))) }))} disabled={gesturing || busy || board.zoom <= 0.5}>−</button>
-              <output aria-label="Nivel de zoom">{Math.round(board.zoom * 100)}%</output>
-              <button aria-label="Acercar" onClick={() => change(previous => ({ ...previous, zoom: clampZoom(Number((previous.zoom + 0.25).toFixed(2))) }))} disabled={gesturing || busy || board.zoom >= 2.5}>＋</button>
-            </div>
-            <button className="center-button" aria-label="Centrar vista" title="Centrar la ficha seleccionada o volver al inicio · 100%" onClick={center} disabled={gesturing || busy}>⌖</button>
+              <div className="zoom-controls" role="group" aria-label="Zoom">
+                <button aria-label="Alejar" onClick={() => change(previous => ({ ...previous, zoom: clampZoom(Number((previous.zoom - 0.25).toFixed(2))) }))} disabled={gesturing || busy || board.zoom <= 0.5}>−</button>
+                <output aria-label="Nivel de zoom">{Math.round(board.zoom * 100)}%</output>
+                <button aria-label="Acercar" onClick={() => change(previous => ({ ...previous, zoom: clampZoom(Number((previous.zoom + 0.25).toFixed(2))) }))} disabled={gesturing || busy || board.zoom >= 2.5}>＋</button>
+              </div>
+              <button className="center-button" aria-label="Centrar vista" title="Centrar la ficha seleccionada o volver al inicio · 100%" onClick={center} disabled={gesturing || busy}>⌖</button>
             </div>
           </div>
           <p id="board-hint" className="board-hint">{mode === 'map' ? 'Ajustando mapa · Las fichas están bloqueadas' : mode === 'measure' ? 'Midiendo · Las fichas y la cámara están bloqueadas' : 'Arrastra una ficha para moverla · Arrastra el fondo para explorar'}</p>
