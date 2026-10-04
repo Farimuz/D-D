@@ -45,6 +45,12 @@ button:focus-visible, input:focus-visible, .board:focus-visible { outline: 3px s
 .grid { position: absolute; inset: 0; z-index: 1; pointer-events: none; background-image: linear-gradient(to right, #3c4655 1px, transparent 1px), linear-gradient(to bottom, #3c4655 1px, transparent 1px); }
 .grid.over-map { background-image: linear-gradient(to right, #ffffffb3 1px, #0008 1px, #0008 2px, transparent 2px), linear-gradient(to bottom, #ffffffb3 1px, #0008 1px, #0008 2px, transparent 2px); }
 .board.adjusting { outline: 3px solid #efc374; outline-offset: -3px; }
+.board.measuring { cursor: crosshair; }
+.measurement { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.measurement line { stroke: #ffe093; stroke-width: 3; }
+.measurement line.measurement-shadow { stroke: #151c26; stroke-width: 6; }
+.measurement circle { fill: #ffe093; stroke: #151c26; stroke-width: 2; }
+.distance { position: absolute; transform: translate(-50%, -50%); background: #171c25; color: #ffe093; border: 1px solid #ffe093; border-radius: 6px; padding: 4px 8px; font-size: 14px; white-space: nowrap; }
 .board.dragging { cursor: grabbing; }
 .board:focus-visible { outline-offset: -4px; }
 .token {
