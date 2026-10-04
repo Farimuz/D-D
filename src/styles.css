@@ -1,0 +1,98 @@
+:root {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #edf0f5;
+  background: #171c25;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+button, input { font: inherit; }
+button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid #586274;
+  border-radius: 10px;
+  color: #edf0f5;
+  background: #293242;
+  padding: 10px 14px;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+button:active { background: #39465a; }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible, input:focus-visible, .board:focus-visible { outline: 3px solid #f6d590; outline-offset: 3px; }
+.app { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+.header {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: max(8px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left));
+  border-bottom: 1px solid #3c4655;
+}
+.brand { display: flex; gap: 12px; align-items: baseline; min-width: 0; }
+.brand h1 { font-size: 23px; letter-spacing: -.5px; margin: 0; color: #f0c77e; }
+.brand > span { font-size: 13px; color: #c2cad6; }
+.quiet { background: transparent; font-size: 13px; }
+.table { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.board {
+  position: absolute; inset: 0; overflow: clip; touch-action: none; user-select: none; -webkit-user-select: none;
+  background-color: #1b222d;
+  background-image: linear-gradient(to right, #3c4655 1px, transparent 1px), linear-gradient(to bottom, #3c4655 1px, transparent 1px);
+  cursor: grab;
+}
+.board.dragging { cursor: grabbing; }
+.board:focus-visible { outline-offset: -4px; }
+.token {
+  position: absolute; transform: translate(-50%, -50%); border: 2px solid #ffe0a0;
+  background: #9a641f; color: #fff8e8; border-radius: 50%; padding: 0; font-weight: 750;
+  line-height: 1; box-shadow: 0 2px 8px #0006; cursor: grab; touch-action: none;
+}
+.token:active { background: #9a641f; cursor: grabbing; }
+.token.selected { outline: 3px solid #f4f6fa; outline-offset: 3px; z-index: 1; }
+.token:focus-visible { outline: 3px solid #a0d6ff; outline-offset: 5px; }
+.map-info { position: absolute; top: 14px; left: max(16px, env(safe-area-inset-left)); padding: 6px 10px; border-radius: 6px; font-size: 12px; background: #171c25; color: #c2cad6; pointer-events: none; }
+.empty-hint { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); width: min(280px, 90%); display: flex; align-items: center; flex-direction: column; gap: 8px; pointer-events: none; text-align: center; background: #1b222dec; padding: 20px; border-radius: 16px; }
+.empty-symbol { color: #f0c77e; font-size: 34px; }
+.empty-hint strong { font-size: 18px; }
+.empty-hint > span:last-child { font-size: 14px; color: #c2cad6; }
+.bottom-controls { position: absolute; bottom: 0; left: 0; right: 0; display: flex; align-items: center; flex-direction: column; gap: 8px; padding: 12px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); pointer-events: none; }
+.bottom-controls button, .selection, .toolbar, .storage-warning { pointer-events: auto; }
+.toolbar { display: flex; align-items: center; gap: 10px; padding: 8px; border: 1px solid #4b5667; border-radius: 14px; background: #171c25; box-shadow: 0 4px 20px #0005; max-width: 100%; }
+.primary { background: #efc374; border-color: #efc374; color: #261d10; font-weight: 700; }
+.primary:active { background: #ffda94; }
+.create-button { min-width: 108px; white-space: nowrap; }
+.zoom-controls { display: flex; align-items: center; }
+.zoom-controls button { border: 0; padding: 4px; font-size: 22px; background: transparent; }
+.zoom-controls output { text-align: center; min-width: 48px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.center-button { font-size: 27px; line-height: 1; padding: 4px; }
+.selection { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: min(430px, 100%); padding: 10px 12px; border: 1px solid #586274; border-radius: 12px; background: #171c25; }
+.selection-name { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.selection-name span { font-size: 11px; color: #c2cad6; }
+.selection-name strong { font-size: 15px; overflow-wrap: anywhere; }
+.danger { color: #ffb1ab; border-color: #b76b67; background: transparent; font-size: 13px; }
+.board-hint { color: #c2cad6; font-size: 11px; text-align: center; margin: 0; background: #171c25; border-radius: 4px; padding: 4px 8px; }
+.storage-warning { width: min(540px, 100%); color: #ffe1a6; background: #453624; padding: 10px 12px; margin: 0; border: 1px solid #ac8a54; border-radius: 10px; font-size: 13px; }
+.name-dialog { width: min(380px, calc(100% - 32px)); border: 1px solid #586274; border-radius: 16px; background: #202835; color: #edf0f5; padding: 24px; max-height: calc(100dvh - 32px); overflow-y: auto; }
+.name-dialog::backdrop { background: #0009; }
+.name-dialog h2 { font-size: 21px; margin: 0 0 22px; }
+.name-dialog label { display: block; font-size: 14px; margin-bottom: 8px; }
+.name-dialog input { width: 100%; min-height: 48px; border: 1px solid #707d91; border-radius: 8px; padding: 10px; background: #151c26; font-size: 16px; color: #edf0f5; }
+.name-dialog input::placeholder { color: #a8b3c3; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 380px) {
+  .version { display: none; }
+  .toolbar { gap: 6px; padding: 6px; }
+  .create-button { min-width: 96px; padding: 10px; }
+  .board-hint { font-size: 10px; }
+}
+@media (max-height: 480px) {
+  .board-hint { display: none; }
+  .header { padding-top: 4px; padding-bottom: 4px; }
+  .bottom-controls { padding-top: 4px; gap: 4px; }
+  .selection { padding-top: 4px; padding-bottom: 4px; }
+  .empty-hint { top: 32%; padding: 8px; gap: 3px; }
+  .empty-symbol { display: none; }
+}
