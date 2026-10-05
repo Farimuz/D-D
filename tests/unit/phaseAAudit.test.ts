@@ -62,7 +62,7 @@ test('audit: every mutation survives a detached JSON store and fails atomically 
   class FaultStore extends MemoryRoomStore {
     fault: 'load' | 'save' | null = null
     override load(id: string) { if (this.fault === 'load') throw new Error('Load failure'); return super.load(id) }
-    override save(state: RoomState) { if (this.fault === 'save') throw new Error('Save failure'); super.save(state) }
+    override save(state: RoomState): undefined { if (this.fault === 'save') throw new Error('Save failure'); super.save(state) }
   }
   const store = new FaultStore(), rooms = new Rooms(store), access = rooms.create(), room = rooms.get(access.roomId)
   rooms.join({ type: 'join', roomId: room.id, role: 'player', name: 'A', identity: 'a'.repeat(64) })
@@ -119,7 +119,7 @@ test('audit: stale independent writes expose absent CAS while Node orders curren
 test('audit: committing then throwing violates the atomic store contract and cannot be called a rollback', () => {
   class NonconformingStore extends MemoryRoomStore {
     failAfterCommit = false
-    override save(state: RoomState) { super.save(state); if (this.failAfterCommit) throw new Error('Failure after commit') }
+    override save(state: RoomState): undefined { super.save(state); if (this.failAfterCommit) throw new Error('Failure after commit') }
   }
   const store = new NonconformingStore(), rooms = new Rooms(store), room = rooms.get(rooms.create().roomId)
   store.failAfterCommit = true

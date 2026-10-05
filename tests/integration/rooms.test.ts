@@ -324,7 +324,7 @@ test('audit: failed DM reads grant no presence; committed player joins and faile
 test('audit: a failed expiry deletion does not crash heartbeat or release the domain record', async t => {
   class DeleteFaultStore extends ReadFaultRoomStore {
     failed = false
-    override delete(id: string) { this.failed = true; throw new Error(`Injected deletion failure: ${id}`) }
+    override delete(id: string): undefined { this.failed = true; throw new Error(`Injected deletion failure: ${id}`) }
   }
   const store = new DeleteFaultStore()
   const { app, url, access } = await server(t, { roomStore: store, heartbeatMs: 20 })

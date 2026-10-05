@@ -10,6 +10,6 @@ export class MemoryRoomStore implements RoomStore {
     const state = this.states.get(roomId)
     return state ? copy(state) : null
   }
-  save(state: RoomState): void { this.states.set(state.id, copy(state)) }
-  delete(roomId: string): void { this.states.delete(roomId) }
+  save(state: RoomState): undefined { this.states.set(state.id, copy(state)) }
+  delete(roomId: string): undefined { this.states.delete(roomId) }
 }

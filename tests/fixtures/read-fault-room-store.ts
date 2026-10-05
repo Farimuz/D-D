@@ -8,5 +8,5 @@ export class ReadFaultRoomStore extends MemoryRoomStore {
     if (this.failNextLoad) { this.failNextLoad = false; throw new Error('Injected read failure') }
     return super.load(id)
   }
-  override save(state: RoomState) { super.save(state); if (this.failReadAfterSave) this.failNextLoad = true }
+  override save(state: RoomState): undefined { super.save(state); if (this.failReadAfterSave) this.failNextLoad = true }
 }

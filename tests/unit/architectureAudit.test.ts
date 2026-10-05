@@ -6,15 +6,26 @@ import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 
-test('audit: the entire core import closure has no provider, browser, network or clock dependencies', async () => {
+test('audit: the core import closure is neutral and its synchronous store rejects Promise methods', async () => {
   const root = fileURLToPath(new URL('../../src/', import.meta.url))
   const directory = await mkdtemp(join(tmpdir(), 'dnd-core-audit-'))
   try {
     const config = join(directory, 'tsconfig.json')
+    const probe = join(directory, 'store-contract.ts')
+    const storePath = resolve(root, 'core/room/store.ts').replaceAll('\\', '/')
+    await writeFile(probe, `import type { RoomStore } from ${JSON.stringify(storePath)}
+export const synchronous: RoomStore = { load: () => null, save: () => undefined, delete: () => undefined }
+// @ts-expect-error A synchronous load cannot accept a Promise.
+export const asyncLoad: RoomStore['load'] = async () => null
+// @ts-expect-error A synchronous commit cannot silently discard a Promise.
+export const asyncSave: RoomStore['save'] = async () => {}
+// @ts-expect-error A synchronous deletion cannot silently discard a Promise.
+export const asyncDelete: RoomStore['delete'] = async () => {}
+`)
     await writeFile(config, JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'ESNext',
       moduleResolution: 'Bundler', allowImportingTsExtensions: true, strict: true, noEmit: true,
       lib: ['ES2022'], types: [] },
-      files: ['domain', 'types', 'store', 'validation'].map(name => resolve(root, 'core/room', name + '.ts')) }))
+      files: [...['domain', 'types', 'store', 'validation'].map(name => resolve(root, 'core/room', name + '.ts')), probe] }))
     // Use the installed compiler CLI: no Node/DOM types, including every transitive file.
     const result = spawnSync(process.execPath, [fileURLToPath(new URL('../../node_modules/typescript/bin/tsc', import.meta.url)),
       '--project', config, '--listFiles'], { encoding: 'utf8', timeout: 20_000, windowsHide: true })
@@ -23,6 +34,7 @@ test('audit: the entire core import closure has no provider, browser, network or
     for (const line of result.stdout.split(/\r?\n/).filter(Boolean)) {
       if (/[\\/]node_modules[\\/](?:typescript|@typescript[\\/]typescript-[^\\/]+)[\\/]lib[\\/]lib\..*\.d\.ts$/.test(line)) continue
       const path = resolve(line)
+      if (path === probe) continue
       assert.ok(path.startsWith(root), `Nonportable dependency: ${path}`)
       visited.add(path)
       const source = await readFile(path, 'utf8')
