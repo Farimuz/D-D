@@ -1,9 +1,13 @@
 export interface Point { x: number; y: number }
 
 // Token coordinates are integer cell indices; camera coordinates are world pixels.
-export interface Token extends Point { id: string; name: string }
+// Missing visibility in v0.0.1/v0.0.2 means public; loading does not rewrite data.
+export interface Token extends Point { id: string; name: string; visible?: boolean }
 export interface MapAsset extends Point { id: string; width: number; height: number; scale: number }
-export type BoardMode = 'normal' | 'map' | 'measure'
+export interface Rectangle extends Point { width: number; height: number }
+export interface FogRegion extends Rectangle { id: string }
+export type FogAction = 'hide' | 'reveal' | 'navigate'
+export type BoardMode = 'normal' | 'map' | 'measure' | 'fog'
 export interface BoardState {
   version: 1
   tokens: Token[]
@@ -11,6 +15,8 @@ export interface BoardState {
   zoom: number
   // Optional only for the saved v0.0.1 schema; loadBoard normalizes it to null.
   map?: MapAsset | null
+  // Missing fog in older saves means no covered regions.
+  fog?: FogRegion[]
 }
 
 export const CELL_SIZE = 64

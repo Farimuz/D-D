@@ -34,6 +34,7 @@ button:focus-visible, input:focus-visible, .board:focus-visible { outline: 3px s
 .brand { display: flex; gap: 12px; align-items: baseline; min-width: 0; }
 .brand h1 { font-size: 23px; letter-spacing: -.5px; margin: 0; color: #f0c77e; }
 .brand > span { font-size: 13px; color: #c2cad6; }
+.header-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .quiet { background: transparent; font-size: 13px; }
 .table { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 .board {
@@ -46,7 +47,14 @@ button:focus-visible, input:focus-visible, .board:focus-visible { outline: 3px s
 .grid.over-map { background-image: linear-gradient(to right, #ffffffb3 1px, #0008 1px, #0008 2px, transparent 2px), linear-gradient(to bottom, #ffffffb3 1px, #0008 1px, #0008 2px, transparent 2px); }
 .board.adjusting { outline: 3px solid #efc374; outline-offset: -3px; }
 .board.measuring { cursor: crosshair; }
-.measurement { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.fog { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.fog-cover { fill: #080e16; fill-opacity: .65; stroke: #7f8996; stroke-opacity: .4; stroke-width: 1; }
+.player-fog .fog-cover { fill-opacity: 1; stroke: #080e16; stroke-opacity: 1; }
+.fog-draft { fill: #f0c77e; fill-opacity: .2; stroke: #f0c77e; stroke-width: 2; stroke-dasharray: 6 4; }
+.fog-draft.reveal { fill: #b3e8ca; stroke: #b3e8ca; }
+.fog-controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.fog-controls button { padding: 8px; font-size: 13px; }
+.measurement { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
 .measurement line { stroke: #ffe093; stroke-width: 3; }
 .measurement line.measurement-shadow { stroke: #151c26; stroke-width: 6; }
 .measurement circle { fill: #ffe093; stroke: #151c26; stroke-width: 2; }
@@ -54,7 +62,7 @@ button:focus-visible, input:focus-visible, .board:focus-visible { outline: 3px s
 .board.dragging { cursor: grabbing; }
 .board:focus-visible { outline-offset: -4px; }
 .token {
-  z-index: 3; position: absolute; transform: translate(-50%, -50%);
+  z-index: 4; position: absolute; transform: translate(-50%, -50%);
   min-width: 12px; min-height: 12px; border: 0; background: transparent;
   padding: 0; display: grid; place-items: center; cursor: grab; touch-action: none;
 }
@@ -64,7 +72,10 @@ button:focus-visible, input:focus-visible, .board:focus-visible { outline: 3px s
   line-height: 1; box-shadow: 0 2px 8px #0006; display: grid; place-items: center; pointer-events: none;
 }
 .token:active { background: transparent; cursor: grabbing; }
-.token.selected { z-index: 4; }
+.token.selected { z-index: 5; }
+.dm-only .token-face { border-style: dashed; }
+.dm-only::after { content: 'DM'; position: absolute; bottom: -4px; font-size: 9px; padding: 1px 3px; border-radius: 3px; color: #e6d7b9; background: #171c25; pointer-events: none; }
+.player-token { pointer-events: none; cursor: inherit; }
 .token.selected .token-face { outline: min(3px, calc(var(--token-size) / 4)) solid #f4f6fa; outline-offset: min(3px, calc(var(--token-size) / 4)); }
 .token:focus-visible { outline: none; }
 .token:focus-visible .token-face { outline: 3px solid #a0d6ff; outline-offset: 5px; }
@@ -79,6 +90,7 @@ button:focus-visible, input:focus-visible, .board:focus-visible { outline: 3px s
 .map-info, .empty-hint { z-index: 10; }
 .bottom-controls button, .selection, .toolbar, .storage-warning, .map-panel { pointer-events: auto; }
 .main-actions, .camera-actions { display: flex; gap: 8px; align-items: center; }
+.camera-actions button { min-width: 45px; }
 .map-panel { width: min(430px, 100%); padding: 10px 12px; border: 1px solid #efc374; border-radius: 12px; background: #171c25; }
 .map-tools { position: absolute; top: 14px; left: 12px; right: 12px; display: flex; justify-content: center; pointer-events: none; z-index: 10; }
 .map-tools .map-panel { pointer-events: auto; }
@@ -129,6 +141,9 @@ button[aria-pressed="true"]:not(.token) { border-color: #efc374; box-shadow: ins
 .selection { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: min(430px, 100%); padding: 10px 12px; border: 1px solid #586274; border-radius: 12px; background: #171c25; }
 .selection-name { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .selection-name span { font-size: 11px; color: #c2cad6; }
+.token-visibility { display: flex; align-items: center; gap: 6px; min-height: 44px; max-width: 136px; flex-shrink: 0; font-size: 12px; cursor: pointer; }
+.token-visibility input { width: 18px; height: 18px; flex-shrink: 0; margin: 0; accent-color: #efc374; }
+.selection-heading .selection-name { flex: 1; }
 .selection-name strong { font-size: 15px; overflow-wrap: anywhere; }
 .selection { flex-wrap: wrap; gap: 8px; }
 .selection-heading { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -153,9 +168,16 @@ button[aria-pressed="true"]:not(.token) { border-color: #efc374; box-shadow: ins
   .board-hint { font-size: 10px; }
 }
 @media (max-width: 560px) {
+  .header { gap: 6px; }
+  .brand { flex-direction: column; gap: 0; }
+  .brand > span { font-size: 11px; }
+  .version { display: none; }
+  .header-actions .quiet { padding: 8px; font-size: 12px; }
   .map-tools { top: 50px; }
   .toolbar { flex-direction: column; gap: 4px; }
   .main-actions { width: 100%; justify-content: center; }
+  .main-actions { gap: 4px; }
+  .main-actions button { padding: 8px; font-size: 13px; }
   .camera-actions { justify-content: center; }
 }
 @media (max-height: 480px) {

@@ -4,7 +4,7 @@ Proyecto para crear una herramienta propia que facilite organizar y jugar partid
 
 La idea es construir una experiencia sencilla de usar tanto en PC como en teléfono, especialmente pensada para reducir el trabajo del Dungeon Master.
 
-**v0.0.2 es una mesa local experimental:** conserva las fichas, el arrastre y la cámara de v0.0.1 y añade importación y ajuste de mapas, medición temporal y edición/duplicado de fichas. No hay backend, cuentas ni multijugador.
+**v0.0.3 — Herramientas del DM** es una mesa local experimental: conserva mapas, alineación, medición y fichas de v0.0.2, y añade niebla manual, fichas Solo DM y vista previa de jugadores. No hay backend, cuentas ni multijugador.
 
 ## Ejecutar
 
@@ -29,6 +29,18 @@ Activa **Medir** y arrastra entre casillas con mouse o un dedo. La distancia ent
 
 Fichas, cámara, zoom y referencia/posición/escala del mapa se guardan en `localStorage`; la imagen se guarda como **Blob en IndexedDB** (bytes binarios si el navegador no puede almacenar Blob), sin Base64 ni subidas. Los datos de v0.0.1 siguen siendo compatibles. Todo pertenece al navegador y dirección usados, sin compartirse entre dispositivos; borrar sus datos elimina la mesa. Si no puede guardarse una importación, se avisa y se conserva el mapa anterior. **Limpiar**, con confirmación, restablece la mesa y borra sus imágenes almacenadas; eliminar fichas o mapa también requiere confirmación.
 
+## Herramientas del DM
+
+Activa **Niebla → Ocultar** y arrastra un rectángulo con mouse o un dedo. La preview se guarda únicamente al soltar; una interrupción o un segundo dedo cancela el dibujo. **Revelar** resta el rectángulo seleccionado de todas las regiones cubiertas. **Ocultar todo** cubre los límites completos del mapa colocado; sin mapa cubre la vista y las fichas usadas con margen. **Mostrar todo** elimina la niebla. Usa **Navegar** para arrastrar la cámara y los controles habituales, la rueda o dos dedos para el zoom; **Listo** termina la herramienta.
+
+En una ficha seleccionada, desactiva **Visible para jugadores** para marcarla **Solo DM**: el DM sigue viéndola con borde discontinuo e indicador DM. Las fichas antiguas y nuevas son públicas por defecto.
+
+**Vista jugadores** proyecta la misma mesa con niebla opaca y sin herramientas de edición. Las fichas Solo DM y las fichas cuyo **centro de casilla** está dentro de algún rectángulo de niebla se excluyen completas, aunque una parte de su círculo quede fuera; el borde izquierdo/superior pertenece al rectángulo, el derecho/inferior no. Puedes navegar y hacer zoom, pero ningún cambio de esta preview se guarda. **Volver a DM** recupera la cámara y selección anteriores; recargar siempre inicia en DM. La medición está disponible solo para el DM.
+
+La niebla y la visibilidad se guardan junto a la mesa en `localStorage`; el mapa continúa en IndexedDB. Los datos de v0.0.1/v0.0.2 conservan su esquema y se interpretan sin reescribirlos al cargar: visibilidad ausente significa pública y niebla ausente significa vacía. La niebla queda anclada al mundo: coloca y alinea el mapa antes de dibujarla; mover o reemplazar después la imagen no mueve ni borra los rectángulos.
+
+Esta preview **no es una frontera de seguridad**: los datos completos siguen en el navegador local. No comparte una partida ni protege secretos frente a alguien con acceso a ese navegador. El revelado geométrico puede fragmentar regiones después de muchas operaciones; no hay pinceles, visión automática ni iluminación dinámica.
+
 ## Producción
 
 ```sh
@@ -48,3 +60,5 @@ npm test
 Las pruebas requieren Chrome y Edge instalados en Windows y verifican también Firefox, WebKit y vistas móviles. Incluyen dos contactos táctiles nativos emulados en Pixel 5/Chromium y dos Pointer Events sintéticos en iPhone 13/WebKit, cuya automatización no permite inyectar pinch nativo ni rueda móvil. La emulación no reemplaza una prueba física en Android o Safari/iOS.
 
 La fixture de [cuadrícula conocida](tests/fixtures/README.md) verifica alineación de casillas de 16 px y exclusión de márgenes. Las pruebas cubren escala, posición, ajuste fino, preview sin guardar, cancelación, reintento, fallo de almacenamiento y conservación de la selección.
+
+Las pruebas de v0.0.3 añaden validación y sustracción de rectángulos, coordenadas negativas, datos antiguos, visibilidad de fichas, persistencia, cancelación de niebla y navegación de jugadores sin cambios guardados. Los escenarios de niebla se ejercitan con mouse y touch en los perfiles móviles indicados; también se revisan los controles en 320 × 568, 390 × 844 y 844 × 390.
