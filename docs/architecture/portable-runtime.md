@@ -4,6 +4,10 @@ Este documento describe el diseño vivo derivado de la decisión [0003 — Núcl
 
 No es una especificación inmutable. Debe actualizarse cuando la implementación real cambie.
 
+## Preparación de v0.0.5 — fase A
+
+La base es `main` en `78e4b4f`, incluida la corrección de medición local para jugadores online. Antes de extraer el dominio se corrigió un defecto de aislamiento en los tests multijugador: los 13 casos acumulaban salas en un único servidor, cuyo límite de producción es 10. La fixture ahora abre y cierra un servidor en memoria por caso. Se conservan todos los escenarios y el límite del producto; esta corrección no cambia la aplicación.
+
 ## Objetivo
 
 D&D debe poder evolucionar sin que Oracle, Cloudflare, `ws`, SQLite, filesystem u otra tecnología de infraestructura se conviertan en el lugar donde vive la lógica del juego.

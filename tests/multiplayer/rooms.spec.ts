@@ -2,10 +2,23 @@ import { test as base, expect, devices, webkit } from '@playwright/test'
 import type { BrowserContext, Page, Browser } from '@playwright/test'
 import { fileURLToPath } from 'node:url'
 import { IDENTITY_KEY, dmKey } from '../../src/online/session'
+import { createRoomServer } from '../../server/app'
 
 interface Clients { dm: Page; a: Page; b: Page; aContext: BrowserContext; aFrames: string[]; errors: string[]; watch(page: Page): void }
-const test = base.extend<{ clients: Clients }>({
-  clients: async ({ page, browser }, use) => {
+const test = base.extend<{ clients: Clients; roomServer: void }>({
+  roomServer: [async ({}, use) => {
+    // A fresh backend per scenario preserves the production ten-room limit.
+    const app = createRoomServer({ dist: fileURLToPath(new URL('../../dist/', import.meta.url)) })
+    try {
+      await new Promise<void>((accept, reject) => {
+        app.http.once('error', reject)
+        app.http.listen(4183, '127.0.0.1', () => { app.http.off('error', reject); accept() })
+      })
+      await use()
+    } finally { await app.close() }
+  }, { auto: true }],
+  clients: async ({ page, browser, roomServer }, use) => {
+    void roomServer
     const errors: string[] = [], aFrames: string[] = []
     function watch(p: Page) {
       p.on('pageerror', e => errors.push(e.message))

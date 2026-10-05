@@ -11,5 +11,4 @@ export default defineConfig({
     { name: 'multiplayer-android', grepInvert: /online alignment/, metadata: { player: 'android' } },
     { name: 'multiplayer-iphone', grepInvert: /online alignment/, metadata: { player: 'iphone' } },
   ],
-  webServer: { command: 'npm run preview -- --host 127.0.0.1 --port 4183 --strictPort', url: 'http://127.0.0.1:4183', reuseExistingServer: false },
 })
