@@ -5,7 +5,7 @@ import { IDENTITY_KEY, dmKey } from '../../src/online/session'
 import { createRoomServer } from '../../server/app'
 
 interface Clients { dm: Page; a: Page; b: Page; aContext: BrowserContext; aFrames: string[]; errors: string[]; watch(page: Page): void }
-const test = base.extend<{ clients: Clients; roomServer: void }>({
+const test = base.extend<{ clients: Clients; roomServer: ReturnType<typeof createRoomServer> }>({
   roomServer: [async ({}, use) => {
     // A fresh backend per scenario preserves the production ten-room limit.
     const app = createRoomServer({ dist: fileURLToPath(new URL('../../dist/', import.meta.url)) })
@@ -14,7 +14,7 @@ const test = base.extend<{ clients: Clients; roomServer: void }>({
         app.http.once('error', reject)
         app.http.listen(4183, '127.0.0.1', () => { app.http.off('error', reject); accept() })
       })
-      await use()
+      await use(app)
     } finally { await app.close() }
   }, { auto: true }],
   clients: async ({ page, browser, roomServer }, use) => {
@@ -185,10 +185,12 @@ test('desktop DM plus two players synchronize ownership, maps and fog with indep
 })
 
 
-test('player measurement is local and does not grant DM editing controls', async ({ clients }) => {
+test('player measurement is local and does not grant DM editing controls', async ({ clients, roomServer }) => {
   const { dm, a, b } = clients
+  const sent: string[] = []
+  a.on('websocket', ws => ws.on('framesent', frame => sent.push(String(frame.payload))))
   await dm.goto('/')
-  const { link } = await online(dm)
+  const { code, link } = await online(dm)
   await join(a, link, 'Carlos')
   await join(b, link, 'Ana')
   await button(dm, 'Cerrar opciones de partida').click()
@@ -197,6 +199,7 @@ test('player measurement is local and does not grant DM editing controls', async
   for (const name of ['＋ Ficha', 'Mapa', 'Niebla', 'Limpiar']) await expect(button(a, name)).toHaveCount(0)
 
   const revision = await dm.locator('.app').getAttribute('data-room-revision')
+  const room = roomServer.rooms.get(code), before = structuredClone(room.board), sentBefore = sent.length
   await button(a, 'Medir').click()
   await expect(a.getByLabel('Medir distancias', { exact: true })).toBeVisible()
 
@@ -206,11 +209,20 @@ test('player measurement is local and does not grant DM editing controls', async
   await drag(a, start, { x: start.x + 128 * zoom, y: start.y })
 
   await expect(a.getByLabel('Distancia', { exact: true })).toHaveText('10 ft')
+  await expect(dm.getByLabel('Distancia', { exact: true })).toHaveCount(0)
   await expect(b.getByLabel('Distancia', { exact: true })).toHaveCount(0)
   expect(await dm.locator('.app').getAttribute('data-room-revision')).toBe(revision)
 
   await button(a, 'Listo').click()
   await expect(a.locator('.measurement')).toHaveCount(0)
+  await button(a, 'Medir').click()
+  await expect(a.locator('.measurement')).toHaveCount(0)
+  await button(a, 'Medir').click()
+  expect(room.board).toEqual(before)
+  expect(room.revision).toBe(Number(revision))
+  expect(sent.slice(sentBefore)).toEqual([])
+  for (const page of [dm, b]) await expect(page.locator('.measurement')).toHaveCount(0)
+  for (const name of ['＋ Ficha', 'Mapa', 'Niebla', 'Limpiar']) await expect(button(a, name)).toHaveCount(0)
 })
 
 test('binary JPEG/WebP, map geometry and player controls work in portrait and landscape', async ({ clients }) => {
