@@ -34,6 +34,7 @@ export function isBoardState(value: unknown): value is BoardState {
     if (!record(token) || typeof token.id !== 'string' || !token.id || ids.has(token.id)) return false
     if (typeof token.name !== 'string' || !token.name.trim() || token.name.length > MAX_NAME_LENGTH) return false
     if (token.visible !== undefined && typeof token.visible !== 'boolean') return false
+    if (token.ownerId !== undefined && token.ownerId !== null && (typeof token.ownerId !== 'string' || !token.ownerId || token.ownerId.length > 128)) return false
     if (!finite(token.x) || !finite(token.y) || !Number.isInteger(token.x) || !Number.isInteger(token.y) || Math.abs(token.x) > MAX_CELL || Math.abs(token.y) > MAX_CELL) return false
     ids.add(token.id)
     return true

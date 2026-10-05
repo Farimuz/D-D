@@ -25,6 +25,8 @@ interface Props {
   player?: boolean
   fogAction?: FogAction
   onFog?(rectangle: Rectangle): void
+  canMoveToken?(token: Token): boolean
+  onMapError?(): void
 }
 interface Gesture extends View {
   pointerId: number
@@ -40,7 +42,7 @@ interface Preview { camera?: Point; zoom?: number; token?: Token; map?: MapAsset
 const midpoint = (a: Point, b: Point): Point => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y)
 
-export default function Board({ board, selectedId, onSelect, onChange, onSize, onGesture, onDelete, mode, mapUrl, disabled, onDone, player = false, fogAction = 'hide', onFog }: Props) {
+export default function Board({ board, selectedId, onSelect, onChange, onSize, onGesture, onDelete, mode, mapUrl, disabled, onDone, player = false, fogAction = 'hide', onFog, canMoveToken, onMapError }: Props) {
   const surface = useRef<HTMLDivElement>(null)
   const gesture = useRef<Gesture | null>(null)
   const pointers = useRef(new Map<number, Point>())
@@ -54,6 +56,7 @@ export default function Board({ board, selectedId, onSelect, onChange, onSize, o
   const [size, setSize] = useState<Point>({ x: 0, y: 0 })
   const [preview, setPreview] = useState<Preview | null>(null)
   const [measurement, setMeasurement] = useState<Measurement | null>(null)
+  const movable = (token: Token) => canMoveToken ? canMoveToken(token) : !player
 
   useEffect(() => {
     if (!pointers.current.size && !wheelTimer.current && wheelFrame.current === null) view.current = { camera: board.camera, zoom: board.zoom }
@@ -191,9 +194,9 @@ export default function Board({ board, selectedId, onSelect, onChange, onSize, o
     }
     suppressClick.current = false
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-token-id]')
-    const token = !player && mode === 'normal' ? board.tokens.find(item => item.id === button?.dataset.tokenId) ?? null : null
+    const token = mode === 'normal' ? board.tokens.find(item => item.id === button?.dataset.tokenId && movable(item)) ?? null : null
     if (token) onSelect(token.id)
-    if (button && !player && mode === 'normal') button.focus({ preventScroll: true })
+    if (button && token && mode === 'normal') button.focus({ preventScroll: true })
     else surface.current?.focus({ preventScroll: true })
     const cell = mode === 'measure' ? pointerCell(point, view.current.camera, view.current.zoom) : null
     const measure = cell ? { from: cell, to: cell } : null
@@ -267,7 +270,7 @@ export default function Board({ board, selectedId, onSelect, onChange, onSize, o
     if (event.key === 'Escape') { cancel(); if (!player) onSelect(null); onDone(); return }
     if (disabled || pointers.current.size || wheelTimer.current || wheelFrame.current !== null || mode !== 'normal') return
     if (player && (event.key === 'Delete' || event.key === 'Backspace')) { event.preventDefault(); return }
-    const token = !player ? board.tokens.find(item => item.id === selectedId) : undefined
+    const token = board.tokens.find(item => item.id === selectedId && movable(item))
     const directions: Record<string, Point> = { ArrowUp: { x: 0, y: -1 }, ArrowDown: { x: 0, y: 1 }, ArrowLeft: { x: -1, y: 0 }, ArrowRight: { x: 1, y: 0 } }
     const step = directions[event.key]
     if (step) {
@@ -294,7 +297,7 @@ export default function Board({ board, selectedId, onSelect, onChange, onSize, o
       onPointerCancel={event => { if (pointers.current.has(event.pointerId)) cancel() }}
       onLostPointerCapture={event => { if (pointers.current.has(event.pointerId)) cancel() }}
       onKeyDown={key} onContextMenu={event => event.preventDefault()}>
-      {map && mapPosition && mapUrl && <img className="map-image" src={mapUrl} alt="Mapa importado" draggable={false}
+      {map && mapPosition && mapUrl && <img className="map-image" src={mapUrl} alt="Mapa importado" draggable={false} onError={onMapError}
         style={{ left: mapPosition.x, top: mapPosition.y, width: map.width * map.scale * zoom, height: map.height * map.scale * zoom }} />}
       <div className={`grid${map ? ' over-map' : ''}`} style={style} aria-hidden="true" />
       <FogOverlay regions={board.fog ?? []} draft={preview?.fog} action={fogAction} player={player} size={size} camera={camera} zoom={zoom} />
@@ -304,11 +307,11 @@ export default function Board({ board, selectedId, onSelect, onChange, onSize, o
         const point = worldToScreen(cellCenter(displayed), size, camera, zoom)
         const diameter = Math.max(2, spacing * 0.8)
         const tokenStyle = { left: point.x, top: point.y, width: Math.max(12, diameter), height: Math.max(12, diameter), '--token-size': `${diameter}px` } as CSSProperties
-        if (player) return <div key={token.id} className="token player-token" role="img" aria-label={`Ficha ${token.name}`} data-token-id={token.id} style={tokenStyle}>
+        if (player && !movable(token)) return <div key={token.id} className="token player-token" role="img" aria-label={`Ficha ${token.name}`} data-token-id={token.id} data-cell-x={token.x} data-cell-y={token.y} style={tokenStyle}>
           <span className="token-face" aria-hidden="true" style={{ fontSize: Math.min(28, spacing * 0.3) }}>{diameter >= 14 ? initials(token.name) : ''}</span>
         </div>
         return (
-          <button key={token.id} type="button" className={`token${selectedId === token.id ? ' selected' : ''}${token.visible === false ? ' dm-only' : ''}`}
+          <button key={token.id} type="button" className={`token${selectedId === token.id ? ' selected' : ''}${token.visible === false ? ' dm-only' : ''}${player ? ' owned-token' : ''}`}
             data-token-id={token.id} data-cell-x={token.x} data-cell-y={token.y}
             style={tokenStyle}
             aria-label={`Ficha ${token.name}`} aria-pressed={selectedId === token.id} title={token.visible === false ? `${token.name} · Solo DM` : token.name} aria-description={token.visible === false ? 'Solo DM' : undefined}
