@@ -13,6 +13,7 @@ import { emptyBoard } from '../../src/state/model.ts'
 import { MAX_IMAGE_BYTES } from '../../src/map/mapAsset.ts'
 import { MAX_MESSAGE_BYTES, shared } from '../../src/online/protocol.ts'
 import type { Action, Join, ServerMessage, Snapshot } from '../../src/online/protocol.ts'
+import { FailingRoomStore } from '../fixtures/failing-room-store.ts'
 
 class Peer {
   socket: WebSocket
@@ -221,4 +222,42 @@ test('production file serving is confined to its directory and does not expose r
   const { url } = await server(t, { dist: fileURLToPath(new URL('../fixtures/', import.meta.url)) })
   assert.equal((await fetch(url + '/grid-16px-margins.png')).status, 200)
   for (const path of ['/..%5C..%5Cpackage.json', '/package.json', '/server/rooms.ts']) assert.ok([403, 404].includes((await fetch(url + path)).status))
+})
+
+test('a failed store write rejects a real WebSocket action without advancing state and permits retry', async t => {
+  const store = new FailingRoomStore()
+  const { app, socketUrl, access } = await server(t, { roomStore: store })
+  const dm = await new Peer(socketUrl).join({ type: 'join', roomId: access.roomId, role: 'dm', credential: access.credential })
+  const a = await new Peer(socketUrl).join(player(access.roomId, 'Carlos'))
+  const before = store.load(access.roomId)!, frames = a.frames.length
+  store.failNextSave = true
+  const rejected = await dm.action({ type: 'token.create', name: 'Arannis', x: 0, y: 0 })
+  assert.deepEqual(rejected, { type: 'result', requestId: '1', ok: false, message: 'No se pudo aplicar la acción.' })
+  assert.deepEqual(store.load(access.roomId), before)
+  assert.equal(app.rooms.get(access.roomId).revision, before.revision)
+  assert.equal(a.frames.length, frames)
+  success(await dm.action({ type: 'token.create', name: 'Arannis', x: 0, y: 0 }))
+  assert.equal((await a.state(before.revision + 1)).board.tokens[0].name, 'Arannis')
+})
+
+test('a failed map metadata save retains served bytes and revision, releases the lock and permits replacement', async t => {
+  const store = new FailingRoomStore()
+  const { app, url, access } = await server(t, { roomStore: store })
+  const bytes = await readFile(new URL('../fixtures/grid-16px-margins.png', import.meta.url))
+  const endpoint = `${url}/api/rooms/${access.roomId}/map`
+  const headers = { Authorization: `Bearer ${access.credential}`, 'X-Map-Layout': JSON.stringify({ x: 0, y: 0, scale: 1, width: 857, height: 1081 }) }
+  const first = await fetch(endpoint, { method: 'PUT', headers, body: bytes })
+  assert.equal(first.status, 200)
+  const original = (await first.json()).map, before = store.load(access.roomId), image = app.rooms.get(access.roomId).image
+  store.failNextSave = true
+  const failed = await fetch(endpoint, { method: 'PUT', headers, body: bytes })
+  assert.equal(failed.status, 500); assert.deepEqual(await failed.json(), { message: 'No se pudo completar la operación.' })
+  assert.deepEqual(store.load(access.roomId), before)
+  assert.equal(app.rooms.get(access.roomId).image, image); assert.equal(app.rooms.get(access.roomId).uploading, false)
+  const retained = await fetch(endpoint + '/' + original.id)
+  assert.equal(retained.status, 200); assert.deepEqual(Buffer.from(await retained.arrayBuffer()), bytes)
+  const retry = await fetch(endpoint, { method: 'PUT', headers, body: bytes })
+  assert.equal(retry.status, 200); assert.notEqual((await retry.json()).map.id, original.id)
+  assert.equal(app.rooms.get(access.roomId).revision, before!.revision + 1)
+  assert.equal((await fetch(endpoint + '/' + original.id)).status, 404)
 })

@@ -10,6 +10,7 @@ import { CREDENTIAL_PATTERN, MAX_MESSAGE_BYTES, keys, record, validActionMessage
 import type { ServerMessage } from '../src/online/protocol.ts'
 import { Rooms, RoomError } from './rooms.ts'
 import type { Actor, Room } from './rooms.ts'
+import type { RoomStore } from '../src/core/room/store.ts'
 
 class HttpError extends Error {
   status: number
@@ -42,8 +43,8 @@ const json = (res: ServerResponse, status: number, data: unknown) => {
 }
 const parseJSON = (s: string) => { try { return JSON.parse(s) as unknown } catch { throw new HttpError(400, 'JSON no válido.') } }
 
-export function createRoomServer(options: { dist?: string; heartbeatMs?: number; joinTimeoutMs?: number } = {}) {
-  const rooms = new Rooms()
+export function createRoomServer(options: { dist?: string; heartbeatMs?: number; joinTimeoutMs?: number; roomStore?: RoomStore } = {}) {
+  const rooms = new Rooms(options.roomStore)
   const sessions = new Map<WebSocket, { room: Room; actor: Actor }>()
   const alive = new Set<WebSocket>()
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES, perMessageDeflate: false })
@@ -97,10 +98,7 @@ export function createRoomServer(options: { dist?: string; heartbeatMs?: number;
           const candidate = { ...room.board, map: { ...layout, id: randomUUID() } }
           if (!validShared(candidate)) throw new HttpError(400, 'La posición o escala del mapa no son válidas.')
           // Commit bytes and metadata together, then broadcast. A failed upload retains both.
-          room.image = { id: candidate.map!.id, bytes, type }
-          room.board = candidate
-          room.revision++
-          room.lastActive = Date.now()
+          rooms.replaceMap(room, { role: 'dm', id: null }, candidate.map, { id: candidate.map.id, bytes, type })
           broadcast(room)
           json(res, 200, { map: room.board.map })
         } finally { room.uploading = false }
@@ -189,7 +187,7 @@ export function createRoomServer(options: { dist?: string; heartbeatMs?: number;
       await new Promise<void>(accept => wss.close(() => accept()))
       http.closeAllConnections()
       await new Promise<void>(accept => http.close(() => accept()))
-      rooms.rooms.clear()
+      rooms.clear()
     },
   }
 }
