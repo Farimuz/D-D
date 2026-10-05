@@ -216,7 +216,7 @@ test('binary JPEG/WebP, map geometry and player controls work in portrait and la
   await create(dm, 'Arannis'); await dm.getByLabel('Controlada por', { exact: true }).selectOption({ label: 'Carlos' })
   for (const size of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 844, height: 390 }]) {
     await a.setViewportSize(size)
-    for (const name of ['Opciones de partida', 'Alejar', 'Acercar', 'Centrar vista']) {
+    for (const name of ['Medir', 'Opciones de partida', 'Alejar', 'Acercar', 'Centrar vista']) {
       const box = (await button(a, name).boundingBox())!
       expect(box.width).toBeGreaterThanOrEqual(44 - .001); expect(box.height).toBeGreaterThanOrEqual(44 - .001)
       expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x + box.width).toBeLessThanOrEqual(size.width + .001)
