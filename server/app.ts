@@ -11,6 +11,7 @@ import type { ServerMessage } from '../src/online/protocol.ts'
 import { Rooms, RoomError } from './rooms.ts'
 import type { Actor, Room } from './rooms.ts'
 import type { RoomStore } from '../src/core/room/store.ts'
+import type { RoomState } from '../src/core/room/types.ts'
 
 class HttpError extends Error {
   status: number
@@ -51,10 +52,20 @@ export function createRoomServer(options: { dist?: string; heartbeatMs?: number;
   function send(socket: WebSocket, data: ServerMessage) {
     if (socket.readyState !== WebSocket.OPEN) return
     if (socket.bufferedAmount > MAX_MESSAGE_BYTES * 2) { socket.close(1013, 'Conexión demasiado lenta'); return }
-    socket.send(JSON.stringify(data))
+    try { socket.send(JSON.stringify(data)) } catch { socket.terminate() }
   }
-  function broadcast(room: Room) {
-    for (const [socket, session] of sessions) if (session.room === room) send(socket, rooms.snapshot(room, session.actor))
+  function storageError(room?: Room) {
+    for (const [socket, session] of sessions) if (!room || session.room === room) send(socket, {
+      type: 'error', code: 'STORAGE', message: 'No se pudo leer o mantener el estado de la sala. Reintenta cuando el almacenamiento esté disponible.',
+    })
+  }
+  function broadcast(room: Room, confirmed?: RoomState) {
+    // A confirmed mutation is published without another fallible storage read.
+    // Presence-only broadcasts read once, before sending any projected state.
+    try {
+      const state = confirmed ?? rooms.read(room)
+      for (const [socket, session] of sessions) if (session.room === room) send(socket, rooms.snapshot(room, session.actor, state))
+    } catch { storageError(room) }
   }
   async function request(req: IncomingMessage, res: ServerResponse) {
     try {
@@ -98,9 +109,9 @@ export function createRoomServer(options: { dist?: string; heartbeatMs?: number;
           const candidate = { ...room.board, map: { ...layout, id: randomUUID() } }
           if (!validShared(candidate)) throw new HttpError(400, 'La posición o escala del mapa no son válidas.')
           // Commit bytes and metadata together, then broadcast. A failed upload retains both.
-          rooms.replaceMap(room, { role: 'dm', id: null }, candidate.map, { id: candidate.map.id, bytes, type })
-          broadcast(room)
-          json(res, 200, { map: room.board.map })
+          const committed = rooms.replaceMap(room, { role: 'dm', id: null }, candidate.map, { id: candidate.map.id, bytes, type })
+          broadcast(room, committed)
+          json(res, 200, { map: committed.board.map })
         } finally { room.uploading = false }
         return
       }
@@ -144,16 +155,16 @@ export function createRoomServer(options: { dist?: string; heartbeatMs?: number;
         if (!session) {
           if (!validJoin(message)) throw new RoomError('INVALID_MESSAGE', 'La identificación de sala no es válida.')
           const next = rooms.join(message)
-          sessions.set(socket, next)
+          sessions.set(socket, { room: next.room, actor: next.actor })
           clearTimeout(joinTimer)
-          broadcast(next.room)
+          broadcast(next.room, next.state)
           return
         }
         if (!validActionMessage(message)) throw new RoomError('INVALID_MESSAGE', 'La acción no tiene una forma válida.')
         try {
           const result = rooms.apply(session.room, session.actor, message.action)
-          broadcast(session.room)
-          send(socket, { type: 'result', requestId: message.requestId, ok: true, ...result })
+          broadcast(session.room, result.state)
+          send(socket, { type: 'result', requestId: message.requestId, ok: true, ...(result.tokenId ? { tokenId: result.tokenId } : {}) })
         } catch (error) {
           send(socket, { type: 'result', requestId: message.requestId, ok: false, message: error instanceof RoomError ? error.message : 'No se pudo aplicar la acción.' })
         }
@@ -171,7 +182,7 @@ export function createRoomServer(options: { dist?: string; heartbeatMs?: number;
     })
   })
   const timer = setInterval(() => {
-    rooms.sweep()
+    try { rooms.sweep() } catch { storageError() }
     for (const socket of wss.clients) {
       if (!alive.has(socket)) { socket.terminate(); continue }
       alive.delete(socket)

@@ -14,6 +14,7 @@ import { MAX_IMAGE_BYTES } from '../../src/map/mapAsset.ts'
 import { MAX_MESSAGE_BYTES, shared } from '../../src/online/protocol.ts'
 import type { Action, Join, ServerMessage, Snapshot } from '../../src/online/protocol.ts'
 import { FailingRoomStore } from '../fixtures/failing-room-store.ts'
+import { ReadFaultRoomStore } from '../fixtures/read-fault-room-store.ts'
 
 class Peer {
   socket: WebSocket
@@ -260,4 +261,77 @@ test('a failed map metadata save retains served bytes and revision, releases the
   assert.equal(retry.status, 200); assert.notEqual((await retry.json()).map.id, original.id)
   assert.equal(app.rooms.get(access.roomId).revision, before!.revision + 1)
   assert.equal((await fetch(endpoint + '/' + original.id)).status, 404)
+})
+
+test('audit: read failure after committed action cannot produce a false rejection or stale broadcast', async t => {
+  const store = new ReadFaultRoomStore()
+  const { socketUrl, access } = await server(t, { roomStore: store })
+  const dm = await new Peer(socketUrl).join({ type: 'join', roomId: access.roomId, role: 'dm', credential: access.credential })
+  const a = await new Peer(socketUrl).join(player(access.roomId, 'A'))
+  store.failReadAfterSave = true
+  const result = await dm.action({ type: 'token.create', name: 'Committed', x: 0, y: 0 })
+  store.failReadAfterSave = false; store.failNextLoad = false
+  success(result)
+  const view = await a.state(1)
+  assert.equal(view.revision, 1); assert.equal(view.board.tokens[0].name, 'Committed')
+  assert.deepEqual(Object.keys(result).sort(), ['ok', 'requestId', 'tokenId', 'type'])
+  assert.deepEqual(Object.keys(view).sort(), ['board', 'dmConnected', 'participants', 'revision', 'role', 'roomId', 'selfId', 'type'])
+})
+
+test('audit: read failure after committed HTTP map cannot return false 500 or lose bytes', async t => {
+  const store = new ReadFaultRoomStore()
+  const { app, url, access } = await server(t, { roomStore: store })
+  const bytes = await readFile(new URL('../fixtures/grid-16px-margins.png', import.meta.url))
+  store.failReadAfterSave = true
+  const endpoint = `${url}/api/rooms/${access.roomId}/map`
+  const response = await fetch(endpoint, { method: 'PUT', body: bytes,
+    headers: { Authorization: `Bearer ${access.credential}`, 'X-Map-Layout': JSON.stringify({ x: 0, y: 0, scale: 1, width: 857, height: 1081 }) } })
+  store.failReadAfterSave = false; store.failNextLoad = false
+  assert.equal(response.status, 200)
+  const map = (await response.json()).map
+  assert.equal(app.rooms.get(access.roomId).revision, 1)
+  assert.deepEqual(Buffer.from(await (await fetch(endpoint + '/' + map.id)).arrayBuffer()), bytes)
+})
+
+test('audit: failed DM reads grant no presence; committed player joins and failed disconnect reads remain recoverable', async t => {
+  const store = new ReadFaultRoomStore()
+  const { app, socketUrl, access } = await server(t, { roomStore: store })
+  const dmJoin: Join = { type: 'join', roomId: access.roomId, role: 'dm', credential: access.credential }
+  const rejected = new Peer(socketUrl)
+  await once(rejected.socket, 'open')
+  store.failNextLoad = true
+  rejected.socket.send(JSON.stringify(dmJoin))
+  await rejected.wait(m => m.type === 'error')
+  await until(() => rejected.socket.readyState === WebSocket.CLOSED)
+  const room = app.rooms.get(access.roomId)
+  assert.equal(room.dmConnections, 0)
+  const dm = await new Peer(socketUrl).join(dmJoin)
+  store.failReadAfterSave = true
+  const a = await new Peer(socketUrl).join(player(access.roomId, 'A'))
+  assert.equal(store.failNextLoad, true) // Confirmed join never re-reads storage to publish.
+  store.failReadAfterSave = false; store.failNextLoad = false
+  const before = store.load(room.id)
+  store.failNextLoad = true
+  await a.close()
+  await dm.wait(m => m.type === 'error' && m.code === 'STORAGE')
+  assert.deepEqual(store.load(room.id), before)
+  assert.equal(room.dmConnections, 1)
+  success(await dm.action({ type: 'token.create', name: 'Recovered', x: 0, y: 0 }))
+  assert.equal(dm.latest!.revision, 1)
+  assert.equal(dm.latest!.participants[0].connected, false)
+})
+
+test('audit: a failed expiry deletion does not crash heartbeat or release the domain record', async t => {
+  class DeleteFaultStore extends ReadFaultRoomStore {
+    failed = false
+    override delete(id: string) { this.failed = true; throw new Error(`Injected deletion failure: ${id}`) }
+  }
+  const store = new DeleteFaultStore()
+  const { app, url, access } = await server(t, { roomStore: store, heartbeatMs: 20 })
+  const room = app.rooms.get(access.roomId), before = store.load(room.id)
+  room.lastActive = Date.now() - 31 * 60_000
+  await until(() => store.failed)
+  assert.equal(app.rooms.get(room.id), room)
+  assert.deepEqual(store.load(room.id), before)
+  assert.equal((await fetch(url + '/api/health')).status, 200)
 })

@@ -23,7 +23,7 @@ export class Rooms {
   readonly rooms = new Map<string, Room>()
   private readonly store: RoomStore
   constructor(store: RoomStore = new MemoryRoomStore()) { this.store = store }
-  private state(room: Pick<Room, 'id'>): RoomState {
+  read(room: Room): RoomState {
     if (this.rooms.get(room.id) !== room) throw new RoomError('ROOM_NOT_FOUND', 'La sala ya no está activa en este servidor.')
     const state = this.store.load(room.id)
     if (!state) throw new RoomError('ROOM_NOT_FOUND', 'La sala ya no existe. El servidor pudo haberse reiniciado.')
@@ -40,7 +40,7 @@ export class Rooms {
     const owner = this
     const room: Room = { id: code, credentialHash: digest(credential),
       // These are views of the store, never a second authoritative board.
-      get board() { return owner.state(room).board }, get revision() { return owner.state(room).revision },
+      get board() { return owner.read(room).board }, get revision() { return owner.read(room).revision },
       members: new Map(), dmConnections: 0, lastActive: Date.now(), image: null, uploading: false }
     this.rooms.set(code, room)
     return { roomId: code, credential }
@@ -53,26 +53,28 @@ export class Rooms {
   authenticateDM(room: Room, credential: string): boolean {
     return timingSafeEqual(room.credentialHash, digest(credential))
   }
-  join(join: Join): { room: Room; actor: Actor } {
+  join(join: Join): { room: Room; actor: Actor; state: RoomState } {
     const room = this.get(join.roomId)
     if (join.role === 'dm') {
       if (!this.authenticateDM(room, join.credential)) throw new RoomError('ACCESS', 'La credencial del DM no es válida.')
       if (room.dmConnections >= 4) throw new RoomError('LIMIT', 'El DM ya tiene cuatro conexiones abiertas.')
+      const state = this.read(room)
       room.dmConnections++
       room.lastActive = Date.now()
-      return { room, actor: { role: 'dm', id: null } }
+      return { room, actor: { role: 'dm', id: null }, state }
     }
     const hash = digest(join.identity).toString('hex')
     const known = [...room.members.values()].find(m => m.identityHash === hash)
     const member = known ?? { id: randomUUID(), identityHash: hash, connected: false, connections: 0 }
     if (member.connections >= 4) throw new RoomError('LIMIT', 'Este jugador ya tiene cuatro conexiones abiertas.')
     // Persist the domain change before granting or changing connection authority.
-    this.store.save(registerParticipant(this.state(room), { id: member.id, name: join.name }))
+    const state = registerParticipant(this.read(room), { id: member.id, name: join.name })
+    this.store.save(state)
     if (!known) room.members.set(member.id, member)
     member.connections++
     member.connected = true
     room.lastActive = Date.now()
-    return { room, actor: { role: 'player', id: member.id } }
+    return { room, actor: { role: 'player', id: member.id }, state }
   }
   leave(room: Room, actor: Actor) {
     if (actor.role === 'dm') room.dmConnections = Math.max(0, room.dmConnections - 1)
@@ -82,25 +84,26 @@ export class Rooms {
     }
     room.lastActive = Date.now()
   }
-  snapshot(room: Room, actor: Actor): Snapshot {
-    return { type: 'state', ...projectRoom(this.state(room), actor, {
+  snapshot(room: Room, actor: Actor, state = this.read(room)): Snapshot {
+    return { type: 'state', ...projectRoom(state, actor, {
       connectedIds: new Set([...room.members.values()].filter(m => m.connected).map(m => m.id)), dmConnected: room.dmConnections > 0,
     }) }
   }
-  apply(room: Room, actor: Actor, action: Action): { tokenId?: string } {
-    const result = applyAction(this.state(room), actor, action, randomUUID)
+  apply(room: Room, actor: Actor, action: Action): { state: RoomState; tokenId?: string } {
+    const result = applyAction(this.read(room), actor, action, randomUUID)
     this.store.save(result.state)
     if (!result.state.board.map) room.image = null
     room.lastActive = Date.now()
-    return result.tokenId ? { tokenId: result.tokenId } : {}
+    return result
   }
   replaceMap(room: Room, actor: Actor, map: MapAsset, image: ImageAsset) {
     if (image.id !== map.id) throw new Error('Asset reference mismatch')
-    const next = replaceMap(this.state(room), actor, map)
+    const next = replaceMap(this.read(room), actor, map)
     // Synchronous memory commit: failed save retains the old metadata and bytes.
     this.store.save(next)
     room.image = image
     room.lastActive = Date.now()
+    return next
   }
   sweep(now = Date.now()) {
     for (const [id, room] of this.rooms) if (!room.dmConnections && ![...room.members.values()].some(m => m.connected) && !room.uploading && now - room.lastActive > 30 * 60_000) {
