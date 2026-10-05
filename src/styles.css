@@ -90,6 +90,7 @@ button:focus-visible, input:focus-visible, .board:focus-visible { outline: 3px s
 .map-info, .empty-hint { z-index: 10; }
 .bottom-controls button, .selection, .toolbar, .storage-warning, .map-panel { pointer-events: auto; }
 .main-actions, .camera-actions { display: flex; gap: 8px; align-items: center; }
+.camera-actions button { min-width: 45px; }
 .map-panel { width: min(430px, 100%); padding: 10px 12px; border: 1px solid #efc374; border-radius: 12px; background: #171c25; }
 .map-tools { position: absolute; top: 14px; left: 12px; right: 12px; display: flex; justify-content: center; pointer-events: none; z-index: 10; }
 .map-tools .map-panel { pointer-events: auto; }
