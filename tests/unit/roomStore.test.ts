@@ -22,7 +22,7 @@ test('Node actions and projections use an injected JSON store as their sole auth
   assert.equal(room.board.tokens[0].x, 20); assert.equal(room.revision, 41)
   const detached = room.board; detached.tokens[0].x = 99
   assert.equal(room.board.tokens[0].x, 20)
-  rooms.clear(); assert.equal(records.size, 0)
+  rooms.delete(room.id); assert.equal(records.size, 0)
 })
 
 test('failed saves preserve actions, map bytes, revisions, activity and participant connection authority', () => {
@@ -50,7 +50,7 @@ test('failed saves preserve actions, map bytes, revisions, activity and particip
   assert.equal(room.image, null); assert.equal(room.revision, before!.revision + 1)
 })
 
-test('failed room creation grants no runtime authority; expiry and shutdown remove stored state', () => {
+test('failed creation grants no runtime authority; expiry deletes state and shutdown only releases runtime', () => {
   const store = new FailingRoomStore(), rooms = new Rooms(store)
   store.failNextSave = true
   assert.throws(() => rooms.create(), /Injected storage/); assert.equal(rooms.rooms.size, 0)
@@ -58,8 +58,11 @@ test('failed room creation grants no runtime authority; expiry and shutdown remo
   room.lastActive = 0
   rooms.sweep(31 * 60_000)
   assert.equal(store.load(room.id), null); assert.equal(rooms.rooms.size, 0)
-  const next = rooms.create(); rooms.clear()
-  assert.equal(store.load(next.roomId), null); assert.equal(rooms.rooms.size, 0)
+  const next = rooms.create(), runtime = rooms.get(next.roomId), before = store.load(next.roomId)
+  rooms.releaseRuntime()
+  assert.deepEqual(store.load(next.roomId), before); assert.equal(rooms.rooms.size, 0)
+  assert.throws(() => rooms.apply(runtime, dm, { type: 'board.reset' }), /activa/)
+  rooms.delete(next.roomId); assert.equal(store.load(next.roomId), null)
 })
 
 test('connection caps remain in Node without changing stored names or granting extra authority', () => {

@@ -24,6 +24,7 @@ export class Rooms {
   private readonly store: RoomStore
   constructor(store: RoomStore = new MemoryRoomStore()) { this.store = store }
   private state(room: Pick<Room, 'id'>): RoomState {
+    if (this.rooms.get(room.id) !== room) throw new RoomError('ROOM_NOT_FOUND', 'La sala ya no está activa en este servidor.')
     const state = this.store.load(room.id)
     if (!state) throw new RoomError('ROOM_NOT_FOUND', 'La sala ya no existe. El servidor pudo haberse reiniciado.')
     return state
@@ -103,12 +104,16 @@ export class Rooms {
   }
   sweep(now = Date.now()) {
     for (const [id, room] of this.rooms) if (!room.dmConnections && ![...room.members.values()].some(m => m.connected) && !room.uploading && now - room.lastActive > 30 * 60_000) {
-      this.store.delete(id)
-      this.rooms.delete(id)
+      this.delete(id)
     }
   }
-  clear() {
-    for (const id of this.rooms.keys()) this.store.delete(id)
+  delete(id: string) {
+    this.store.delete(id)
+    this.rooms.delete(id)
+  }
+  releaseRuntime() {
+    // Shutdown releases this runtime's access/presence/bytes, never domain records.
+    for (const room of this.rooms.values()) { room.image = null; room.members.clear(); room.dmConnections = 0 }
     this.rooms.clear()
   }
 }

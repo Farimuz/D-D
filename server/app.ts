@@ -187,7 +187,7 @@ export function createRoomServer(options: { dist?: string; heartbeatMs?: number;
       await new Promise<void>(accept => wss.close(() => accept()))
       http.closeAllConnections()
       await new Promise<void>(accept => http.close(() => accept()))
-      rooms.clear()
+      rooms.releaseRuntime()
     },
   }
 }
