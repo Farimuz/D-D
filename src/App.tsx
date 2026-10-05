@@ -85,7 +85,10 @@ function Table({ room, store, initialNotice, onLocal, onEnter, onCreateRoom }: T
   const selectionHeight = useRef(140)
   const selected = board.tokens.find(token => token.id === selectedId)
   const preview = playerView !== null
-  const player = preview || room?.join.role === 'player'
+  const connectedPlayer = room?.join.role === 'player'
+  const player = preview || connectedPlayer
+  const canMeasure = !preview
+  const boardMode: BoardMode = connectedPlayer ? (mode === 'measure' ? 'measure' : 'normal') : preview ? 'normal' : mode
   const offline = Boolean(room && room.connection !== 'connected')
   const editDisabled = gesturing || busy || offline
   const displayedBoard = playerView ? { ...board, ...playerView } : board
@@ -280,7 +283,7 @@ function Table({ room, store, initialNotice, onLocal, onEnter, onCreateRoom }: T
           setAnnouncement('Cuadrícula alineada. Escala y posición guardadas.')
           return true
         }} /> : <>
-        <Board board={displayedBoard} selectedId={selectedId} onSelect={id => { if (!preview) { setSelectedId(id); if (id) setMapMenu(false) } }} onChange={changeView} onSize={setSize} onGesture={setGesturing} onDelete={remove} mode={player ? 'normal' : mode} mapUrl={mapImage.url} disabled={busy} onDone={() => preview ? setPlayerView(null) : setMode('normal')} player={player} fogAction={fogAction} onFog={editFog} canMoveToken={canMove} onMapError={room ? () => setMapWarning('No se pudo abrir el mapa online. Pide al DM que lo reimporte.') : undefined} />
+        <Board board={displayedBoard} selectedId={selectedId} onSelect={id => { if (!preview) { setSelectedId(id); if (id) setMapMenu(false) } }} onChange={changeView} onSize={setSize} onGesture={setGesturing} onDelete={remove} mode={boardMode} mapUrl={mapImage.url} disabled={busy} onDone={() => preview ? setPlayerView(null) : setMode('normal')} player={player} fogAction={fogAction} onFog={editFog} canMoveToken={canMove} onMapError={room ? () => setMapWarning('No se pudo abrir el mapa online. Pide al DM que lo reimporte.') : undefined} />
         <div className="map-info" aria-hidden="true">1 casilla = 5 pies</div>
         {!player && mode === 'map' && board.map && <div className="map-tools"><MapControls map={board.map} disabled={editDisabled} canAlign={Boolean(mapImage.url)} onAlign={() => setAligning(true)} onDone={() => setMode('normal')} onScale={scale => change(previous => ({ ...previous, map: previous.map ? { ...previous.map, scale } : null }))} /></div>}
         {!player && board.tokens.length === 0 && !board.map && mode === 'normal' && <div className="empty-hint"><span className="empty-symbol" aria-hidden="true">＋</span><strong>Tu mesa empieza aquí</strong><span>Crea una ficha o importa un mapa.</span></div>}
@@ -288,7 +291,7 @@ function Table({ room, store, initialNotice, onLocal, onEnter, onCreateRoom }: T
         <div className="bottom-controls">
           {(warning || mapWarning || mapImage.warning) && <p className="storage-warning" role="alert">{[warning, mapWarning, mapImage.warning].filter(Boolean).join(' ')}</p>}
           {busy && <p className="board-hint" role="status">Procesando mapa…</p>}
-          {!player && mode === 'measure' && <section className="map-panel" aria-label="Medir distancias"><div className="panel-heading"><strong>Medir</strong><button onClick={() => setMode('normal')} disabled={editDisabled}>Listo</button></div><p>Arrastra de una casilla a otra · 5 pies por casilla</p></section>}
+          {canMeasure && mode === 'measure' && <section className="map-panel" aria-label="Medir distancias"><div className="panel-heading"><strong>Medir</strong><button onClick={() => setMode('normal')} disabled={editDisabled}>Listo</button></div><p>Arrastra de una casilla a otra · 5 pies por casilla</p></section>}
           {!player && mapMenu && board.map && mode === 'normal' && <section className="map-panel map-actions" aria-label="Opciones del mapa">
             <button disabled={editDisabled} onClick={() => { setMode('map'); setMapMenu(false) }}>Ajustar mapa</button>
             <button disabled={editDisabled} onClick={showMap}>Ver mapa completo</button>
@@ -305,11 +308,11 @@ function Table({ room, store, initialNotice, onLocal, onEnter, onCreateRoom }: T
             {room && <label className="token-owner">Controlada por<select aria-label="Controlada por" value={selected.ownerId ?? ''} disabled={editDisabled} onChange={event => { const ownerId = event.target.value || null; change(previous => ({ ...previous, tokens: previous.tokens.map(t => t.id === selected.id ? { ...t, ownerId } : t) })) }}><option value="">DM</option>{room.snapshot?.participants.map(p => <option key={p.id} value={p.id} disabled={!p.connected && selected.ownerId !== p.id}>{p.name}{p.connected ? '' : ' (desconectado)'}</option>)}</select></label>}
           </section>}
           <div className="toolbar" role="group" aria-label="Controles de la mesa">
-            {!player && <div className="main-actions">
-              <button ref={createButton} className="primary create-button" onClick={() => { setMode('normal'); setMapMenu(false); setCreating(true) }} disabled={editDisabled}>＋ Ficha</button>
-              <button aria-pressed={mapMenu || mode === 'map'} onClick={() => { if (board.map) { selectionHeight.current = document.querySelector('.selection')?.getBoundingClientRect().height ?? selectionHeight.current; setMode('normal'); setMapMenu(!mapMenu) } else fileInput.current?.click() }} disabled={editDisabled}>Mapa</button>
+            {canMeasure && <div className="main-actions">
+              {!connectedPlayer && <button ref={createButton} className="primary create-button" onClick={() => { setMode('normal'); setMapMenu(false); setCreating(true) }} disabled={editDisabled}>＋ Ficha</button>}
+              {!connectedPlayer && <button aria-pressed={mapMenu || mode === 'map'} onClick={() => { if (board.map) { selectionHeight.current = document.querySelector('.selection')?.getBoundingClientRect().height ?? selectionHeight.current; setMode('normal'); setMapMenu(!mapMenu) } else fileInput.current?.click() }} disabled={editDisabled}>Mapa</button>}
               <button aria-pressed={mode === 'measure'} onClick={() => { setMode(mode === 'measure' ? 'normal' : 'measure'); setMapMenu(false) }} disabled={editDisabled}>Medir</button>
-              <button aria-pressed={mode === 'fog'} onClick={() => { setMode(mode === 'fog' ? 'normal' : 'fog'); setFogAction('hide'); setMapMenu(false) }} disabled={editDisabled}>Niebla</button>
+              {!connectedPlayer && <button aria-pressed={mode === 'fog'} onClick={() => { setMode(mode === 'fog' ? 'normal' : 'fog'); setFogAction('hide'); setMapMenu(false) }} disabled={editDisabled}>Niebla</button>}
             </div>}
             <div className="camera-actions">
               <div className="zoom-controls" role="group" aria-label="Zoom">
@@ -320,7 +323,7 @@ function Table({ room, store, initialNotice, onLocal, onEnter, onCreateRoom }: T
               <button className="center-button" aria-label="Centrar vista" title="Centrar la ficha seleccionada o volver al inicio · 100%" onClick={center} disabled={gesturing || busy}>⌖</button>
             </div>
           </div>
-          <p id="board-hint" className="board-hint">{room?.join.role === 'player' ? (room.snapshot?.dmConnected ? 'Mueve tus fichas · Navega con el fondo y dos dedos' : 'DM desconectado · Puedes seguir navegando') : player ? 'Vista jugadores · Solo navegación · No se guardan cambios' : mode === 'fog' ? (fogAction === 'navigate' ? 'Arrastra el fondo para navegar · Dos dedos o rueda para zoom' : `${fogAction === 'hide' ? 'Ocultar' : 'Revelar'} · Arrastra un rectángulo · Dos dedos para navegar`) : mode === 'map' ? 'Ajustando mapa · Las fichas están bloqueadas' : mode === 'measure' ? 'Midiendo · Dos dedos para navegar' : 'Arrastra una ficha para moverla · Arrastra el fondo para explorar'}</p>
+          <p id="board-hint" className="board-hint">{room?.join.role === 'player' ? (mode === 'measure' ? 'Midiendo · Arrastra de una casilla a otra · Dos dedos para navegar' : room.snapshot?.dmConnected ? 'Mueve tus fichas · Navega con el fondo y dos dedos' : 'DM desconectado · Puedes seguir navegando') : player ? 'Vista jugadores · Solo navegación · No se guardan cambios' : mode === 'fog' ? (fogAction === 'navigate' ? 'Arrastra el fondo para navegar · Dos dedos o rueda para zoom' : `${fogAction === 'hide' ? 'Ocultar' : 'Revelar'} · Arrastra un rectángulo · Dos dedos para navegar`) : mode === 'map' ? 'Ajustando mapa · Las fichas están bloqueadas' : mode === 'measure' ? 'Midiendo · Dos dedos para navegar' : 'Arrastra una ficha para moverla · Arrastra el fondo para explorar'}</p>
         </div>
         </>}
       </main>
