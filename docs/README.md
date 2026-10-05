@@ -54,8 +54,7 @@ Las decisiones importantes deben poder responder, de forma breve:
 
 Estas decisiones forman historial. Si una decisión cambia en el futuro, es preferible registrar una nueva decisión que explique el cambio en lugar de borrar el razonamiento anterior.
 
-## Estado actual
-
-La primera decisión formal registrada bajo este esquema es:
+## Decisiones registradas
 
 - [0001 — Priorizar juego e integración con mapas externos sobre generación propia](decisions/0001-external-maps-over-built-in-generation.md)
+- [0002 — Visión de D&D como sistema completo, accesible y extensible](decisions/0002-complete-accessible-extensible-game-system.md)
