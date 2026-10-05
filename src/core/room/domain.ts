@@ -102,9 +102,14 @@ export function replaceMap(state: RoomState, actor: Actor, map: MapAsset): RoomS
 export function projectRoom(state: RoomState, actor: Actor, presence: Presence): RoomProjection {
   requireActor(state, actor)
   return { roomId: state.id, revision: state.revision, role: actor.role, selfId: actor.id,
-    board: { ...state.board,
-      tokens: state.board.tokens.filter(t => actor.role === 'dm' || visibleToPlayers(t, state.board.fog)).map(t => ({ ...t })),
-      map: state.board.map ? { ...state.board.map } : null, fog: state.board.fog.map(r => ({ ...r })) },
-    participants: actor.role === 'dm' ? state.participants.map(p => ({ ...p, connected: presence.connectedIds.has(p.id) })) : [],
+    board: { version: state.board.version,
+      tokens: state.board.tokens.filter(t => actor.role === 'dm' || visibleToPlayers(t, state.board.fog)).map(t => ({
+        id: t.id, name: t.name, x: t.x, y: t.y,
+        ...(t.visible === undefined ? {} : { visible: t.visible }), ...(t.ownerId === undefined ? {} : { ownerId: t.ownerId }),
+      })),
+      map: state.board.map ? { id: state.board.map.id, x: state.board.map.x, y: state.board.map.y,
+        width: state.board.map.width, height: state.board.map.height, scale: state.board.map.scale } : null,
+      fog: state.board.fog.map(r => ({ id: r.id, x: r.x, y: r.y, width: r.width, height: r.height })) },
+    participants: actor.role === 'dm' ? state.participants.map(p => ({ id: p.id, name: p.name, connected: presence.connectedIds.has(p.id) })) : [],
     dmConnected: presence.dmConnected }
 }
