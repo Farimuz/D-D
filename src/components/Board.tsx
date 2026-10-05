@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent, PointerEvent } from 'react'
 import { CELL_SIZE } from '../state/model'
-import type { BoardMode, BoardState, MapAsset, Point, Token } from '../state/model'
+import type { BoardMode, BoardState, FogAction, MapAsset, Point, Rectangle, Token } from '../state/model'
 import { cellCenter, initials, limitCamera, screenToWorld, snapCell, worldToScreen, zoomAt } from '../map/geometry'
 import type { View } from '../map/geometry'
 import { worldCell } from '../map/measurement'
 import type { Measurement } from '../map/measurement'
 import MeasurementOverlay from './MeasurementOverlay'
+import FogOverlay from './FogOverlay'
+import { rectangleBetween, visibleToPlayers } from '../map/fog'
 
 interface Props {
   board: BoardState
@@ -20,6 +22,9 @@ interface Props {
   mapUrl: string | null
   disabled: boolean
   onDone(): void
+  player?: boolean
+  fogAction?: FogAction
+  onFog?(rectangle: Rectangle): void
 }
 interface Gesture extends View {
   pointerId: number
@@ -27,14 +32,15 @@ interface Gesture extends View {
   token: Token | null
   map: MapAsset | null
   measure: Measurement | null
+  fog: Point | null
   moved: boolean
 }
 interface Pinch { ids: [number, number]; midpoint: Point; distance: number; view: View }
-interface Preview { camera?: Point; zoom?: number; token?: Token; map?: MapAsset; measure?: Measurement }
+interface Preview { camera?: Point; zoom?: number; token?: Token; map?: MapAsset; measure?: Measurement; fog?: Rectangle }
 const midpoint = (a: Point, b: Point): Point => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y)
 
-export default function Board({ board, selectedId, onSelect, onChange, onSize, onGesture, onDelete, mode, mapUrl, disabled, onDone }: Props) {
+export default function Board({ board, selectedId, onSelect, onChange, onSize, onGesture, onDelete, mode, mapUrl, disabled, onDone, player = false, fogAction = 'hide', onFog }: Props) {
   const surface = useRef<HTMLDivElement>(null)
   const gesture = useRef<Gesture | null>(null)
   const pointers = useRef(new Map<number, Point>())
@@ -83,7 +89,7 @@ export default function Board({ board, selectedId, onSelect, onChange, onSize, o
     onGesture(false)
     ids.forEach(release)
   }
-  useEffect(() => { cancel() }, [mode, disabled])
+  useEffect(() => { cancel() }, [mode, disabled, player, fogAction])
   useEffect(() => () => { if (wheelTimer.current) clearTimeout(wheelTimer.current); if (wheelFrame.current !== null) cancelAnimationFrame(wheelFrame.current) }, [])
 
   function commitView() {
@@ -157,7 +163,7 @@ export default function Board({ board, selectedId, onSelect, onChange, onSize, o
     const [a, b] = entries
     const active = gesture.current
     // Keep a camera pan's preview; roll back token, map and measurement previews.
-    if (active?.token || active?.map || active?.measure) view.current = { camera: active.camera, zoom: active.zoom }
+    if (active?.token || active?.map || active?.measure || active?.fog) view.current = { camera: active.camera, zoom: active.zoom }
     gesture.current = null
     setMeasurement(null)
     suppressClick.current = true
@@ -185,14 +191,15 @@ export default function Board({ board, selectedId, onSelect, onChange, onSize, o
     }
     suppressClick.current = false
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-token-id]')
-    const token = mode === 'normal' ? board.tokens.find(item => item.id === button?.dataset.tokenId) ?? null : null
+    const token = !player && mode === 'normal' ? board.tokens.find(item => item.id === button?.dataset.tokenId) ?? null : null
     if (token) onSelect(token.id)
-    if (button && mode === 'normal') button.focus({ preventScroll: true })
+    if (button && !player && mode === 'normal') button.focus({ preventScroll: true })
     else surface.current?.focus({ preventScroll: true })
     const cell = mode === 'measure' ? pointerCell(point, view.current.camera, view.current.zoom) : null
     const measure = cell ? { from: cell, to: cell } : null
     if (measure) setMeasurement(measure)
-    gesture.current = { pointerId: event.pointerId, start: point, ...view.current, token, map: mode === 'map' ? board.map ?? null : null, measure, moved: false }
+    const fog = !player && mode === 'fog' && fogAction !== 'navigate' ? screenToWorld(local(point), size, view.current.camera, view.current.zoom) : null
+    gesture.current = { pointerId: event.pointerId, start: point, ...view.current, token, map: !player && mode === 'map' ? board.map ?? null : null, measure, fog, moved: false }
     onGesture(true)
   }
   function position(point: Point, active: Gesture): Preview {
@@ -202,6 +209,7 @@ export default function Board({ board, selectedId, onSelect, onChange, onSize, o
     if (Math.hypot(dx, dy) > 4) active.moved = true
     if (!active.moved) return {}
     suppressClick.current = true
+    if (active.fog) return { fog: rectangleBetween(active.fog, screenToWorld(local(point), size, active.camera, active.zoom)) ?? undefined }
     if (active.map) return { map: { ...active.map, x: limitCamera(active.map.x + dx / active.zoom), y: limitCamera(active.map.y + dy / active.zoom) } }
     return active.token
       ? { token: { ...active.token, x: active.token.x + dx / active.zoom / CELL_SIZE, y: active.token.y + dy / active.zoom / CELL_SIZE } }
@@ -231,7 +239,7 @@ export default function Board({ board, selectedId, onSelect, onChange, onSize, o
       else if (pointers.current.size === 1) {
         const [id, start] = [...pointers.current.entries()][0]
         // The remaining finger navigates; never resume an interrupted token/edit/measure drag.
-        gesture.current = { pointerId: id, start, ...view.current, token: null, map: null, measure: null, moved: false }
+        gesture.current = { pointerId: id, start, ...view.current, token: null, map: null, measure: null, fog: null, moved: false }
       } else onGesture(false)
       release(event.pointerId)
       return
@@ -243,7 +251,8 @@ export default function Board({ board, selectedId, onSelect, onChange, onSize, o
     gesture.current = null
     setPreview(null)
     onGesture(false)
-    if (final.measure) setMeasurement(final.measure)
+    if (final.fog && !player) onFog?.(final.fog)
+    else if (final.measure) setMeasurement(final.measure)
     else if (final.map) onChange(previous => ({ ...previous, map: final.map! }))
     else if (final.token) {
       const moved = { ...final.token, x: snapCell(final.token.x), y: snapCell(final.token.y) }
@@ -255,9 +264,10 @@ export default function Board({ board, selectedId, onSelect, onChange, onSize, o
     release(event.pointerId)
   }
   function key(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === 'Escape') { cancel(); onSelect(null); onDone(); return }
+    if (event.key === 'Escape') { cancel(); if (!player) onSelect(null); onDone(); return }
     if (disabled || pointers.current.size || wheelTimer.current || wheelFrame.current !== null || mode !== 'normal') return
-    const token = board.tokens.find(item => item.id === selectedId)
+    if (player && (event.key === 'Delete' || event.key === 'Backspace')) { event.preventDefault(); return }
+    const token = !player ? board.tokens.find(item => item.id === selectedId) : undefined
     const directions: Record<string, Point> = { ArrowUp: { x: 0, y: -1 }, ArrowDown: { x: 0, y: 1 }, ArrowLeft: { x: -1, y: 0 }, ArrowRight: { x: 1, y: 0 } }
     const step = directions[event.key]
     if (step) {
@@ -279,7 +289,7 @@ export default function Board({ board, selectedId, onSelect, onChange, onSize, o
   const map = preview?.map ?? board.map
   const mapPosition = map ? worldToScreen(map, size, camera, zoom) : null
   return (
-    <div ref={surface} className={`board${preview ? ' dragging' : ''}${mode === 'map' ? ' adjusting' : ''}${mode === 'measure' ? ' measuring' : ''}`} tabIndex={0} role="region" aria-label="Mesa cuadriculada" aria-describedby="board-hint"
+    <div ref={surface} className={`board${preview ? ' dragging' : ''}${mode === 'map' ? ' adjusting' : ''}${mode === 'measure' || (mode === 'fog' && fogAction !== 'navigate') ? ' measuring' : ''}`} tabIndex={0} role="region" aria-label="Mesa cuadriculada" aria-describedby="board-hint" data-player={player} data-camera-x={camera.x} data-camera-y={camera.y} data-zoom={zoom}
       onPointerDown={down} onPointerMove={move} onPointerUp={up}
       onPointerCancel={event => { if (pointers.current.has(event.pointerId)) cancel() }}
       onLostPointerCapture={event => { if (pointers.current.has(event.pointerId)) cancel() }}
@@ -287,16 +297,21 @@ export default function Board({ board, selectedId, onSelect, onChange, onSize, o
       {map && mapPosition && mapUrl && <img className="map-image" src={mapUrl} alt="Mapa importado" draggable={false}
         style={{ left: mapPosition.x, top: mapPosition.y, width: map.width * map.scale * zoom, height: map.height * map.scale * zoom }} />}
       <div className={`grid${map ? ' over-map' : ''}`} style={style} aria-hidden="true" />
+      <FogOverlay regions={board.fog ?? []} draft={preview?.fog} action={fogAction} player={player} size={size} camera={camera} zoom={zoom} />
       {mode === 'measure' && (preview?.measure ?? measurement) && <MeasurementOverlay measurement={(preview?.measure ?? measurement)!} size={size} camera={camera} zoom={zoom} />}
-      {board.tokens.map(token => {
+      {board.tokens.filter(token => !player || visibleToPlayers(token, board.fog)).map(token => {
         const displayed = preview?.token?.id === token.id ? preview.token : token
         const point = worldToScreen(cellCenter(displayed), size, camera, zoom)
         const diameter = Math.max(2, spacing * 0.8)
+        const tokenStyle = { left: point.x, top: point.y, width: Math.max(12, diameter), height: Math.max(12, diameter), '--token-size': `${diameter}px` } as CSSProperties
+        if (player) return <div key={token.id} className="token player-token" role="img" aria-label={`Ficha ${token.name}`} data-token-id={token.id} style={tokenStyle}>
+          <span className="token-face" aria-hidden="true" style={{ fontSize: Math.min(28, spacing * 0.3) }}>{diameter >= 14 ? initials(token.name) : ''}</span>
+        </div>
         return (
-          <button key={token.id} type="button" className={`token${selectedId === token.id ? ' selected' : ''}`}
+          <button key={token.id} type="button" className={`token${selectedId === token.id ? ' selected' : ''}${token.visible === false ? ' dm-only' : ''}`}
             data-token-id={token.id} data-cell-x={token.x} data-cell-y={token.y}
-            style={{ left: point.x, top: point.y, width: Math.max(12, diameter), height: Math.max(12, diameter), '--token-size': `${diameter}px` } as CSSProperties}
-            aria-label={`Ficha ${token.name}`} aria-pressed={selectedId === token.id} title={token.name}
+            style={tokenStyle}
+            aria-label={`Ficha ${token.name}`} aria-pressed={selectedId === token.id} title={token.visible === false ? `${token.name} · Solo DM` : token.name} aria-description={token.visible === false ? 'Solo DM' : undefined}
             disabled={disabled} onFocus={() => { if (mode === 'normal' && !pinch.current && pointers.current.size <= 1) onSelect(token.id) }} onClick={event => { if (mode === 'normal' && !pinch.current && (!suppressClick.current || event.detail === 0)) onSelect(token.id) }}>
             <span className="token-face" aria-hidden="true" style={{ fontSize: Math.min(28, spacing * 0.3) }}>{diameter >= 14 ? initials(token.name) : ''}</span>
           </button>
