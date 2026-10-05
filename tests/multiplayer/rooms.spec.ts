@@ -113,7 +113,8 @@ test('desktop DM plus two players synchronize ownership, maps and fog with indep
   await expect(a.getByLabel('Ficha Secreto irrepetible', { exact: true })).toHaveCount(0)
   await button(dm, 'Ficha Arannis').click(); await dm.getByLabel('Controlada por', { exact: true }).selectOption({ label: 'Carlos' })
   await expect(button(a, 'Ficha Arannis')).toBeVisible(); await expect(b.getByRole('img', { name: 'Ficha Arannis', exact: true })).toBeVisible()
-  for (const name of ['＋ Ficha', 'Mapa', 'Medir', 'Niebla', 'Limpiar']) await expect(button(a, name)).toHaveCount(0)
+  for (const name of ['＋ Ficha', 'Mapa', 'Niebla', 'Limpiar']) await expect(button(a, name)).toHaveCount(0)
+  await expect(button(a, 'Medir')).toBeVisible()
   await expect(a.getByLabel('Archivo del mapa', { exact: true })).toHaveCount(0)
   const before = await coords(a, 'Arannis'), token = (await button(a, 'Ficha Arannis').boundingBox())!, zoom = (await view(a)).zoom
   const center = { x: token.x + token.width / 2, y: token.y + token.height / 2 }
@@ -168,6 +169,35 @@ test('desktop DM plus two players synchronize ownership, maps and fog with indep
   await button(dm, 'Mesa local').click()
   expect(await dm.evaluate(() => localStorage.getItem('dnd.local-board.v1'))).toBe(localBefore)
   await expect(button(dm, 'Ficha Secreto irrepetible')).toBeVisible(); await expect(dm.locator('.map-image')).toBeVisible()
+})
+
+
+test('player measurement is local and does not grant DM editing controls', async ({ clients }) => {
+  const { dm, a, b } = clients
+  await dm.goto('/')
+  const { link } = await online(dm)
+  await join(a, link, 'Carlos')
+  await join(b, link, 'Ana')
+  await button(dm, 'Cerrar opciones de partida').click()
+
+  await expect(button(a, 'Medir')).toBeVisible()
+  for (const name of ['＋ Ficha', 'Mapa', 'Niebla', 'Limpiar']) await expect(button(a, name)).toHaveCount(0)
+
+  const revision = await dm.locator('.app').getAttribute('data-room-revision')
+  await button(a, 'Medir').click()
+  await expect(a.getByLabel('Medir distancias', { exact: true })).toBeVisible()
+
+  const bounds = (await board(a).boundingBox())!
+  const zoom = (await view(a)).zoom
+  const start = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }
+  await drag(a, start, { x: start.x + 128 * zoom, y: start.y })
+
+  await expect(a.getByLabel('Distancia', { exact: true })).toHaveText('10 ft')
+  await expect(b.getByLabel('Distancia', { exact: true })).toHaveCount(0)
+  expect(await dm.locator('.app').getAttribute('data-room-revision')).toBe(revision)
+
+  await button(a, 'Listo').click()
+  await expect(a.locator('.measurement')).toHaveCount(0)
 })
 
 test('binary JPEG/WebP, map geometry and player controls work in portrait and landscape', async ({ clients }) => {
