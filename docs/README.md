@@ -58,3 +58,8 @@ Estas decisiones forman historial. Si una decisión cambia en el futuro, es pref
 
 - [0001 — Priorizar juego e integración con mapas externos sobre generación propia](decisions/0001-external-maps-over-built-in-generation.md)
 - [0002 — Visión de D&D como sistema completo, accesible y extensible](decisions/0002-complete-accessible-extensible-game-system.md)
+- [0003 — Núcleo portable con adaptadores de infraestructura](decisions/0003-portable-core-infrastructure-adapters.md)
+
+## Arquitectura vigente
+
+- [Arquitectura portable de runtime](architecture/portable-runtime.md): fronteras entre core e infraestructura, persistencia, assets, realtime, concurrencia, migraciones, pruebas y adaptadores Node/Cloudflare.
