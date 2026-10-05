@@ -1,6 +1,7 @@
 import { emptyBoard, MAX_CELL, MAX_CAMERA, MAX_NAME_LENGTH, MAX_ZOOM, MIN_ZOOM } from './model.ts'
 import type { BoardState } from './model.ts'
 import { MIN_MAP_SCALE, MAX_MAP_SCALE, MAX_IMAGE_PIXELS } from '../map/mapAsset.ts'
+import { isRectangle } from '../map/fog.ts'
 
 export const STORAGE_KEY = 'dnd.local-board.v1'
 export interface StorageLike { getItem(key: string): string | null; setItem(key: string, value: string): void }
@@ -21,9 +22,18 @@ export function isBoardState(value: unknown): value is BoardState {
     if (!finite(map.scale) || map.scale < MIN_MAP_SCALE || map.scale > MAX_MAP_SCALE) return false
   }
   const ids = new Set<string>()
+  if (value.fog !== undefined) {
+    if (!Array.isArray(value.fog) || !value.fog.every(region => {
+      if (!record(region) || typeof region.id !== 'string' || !region.id || region.id.length > 128 || ids.has(region.id) || !isRectangle(region)) return false
+      ids.add(region.id)
+      return true
+    })) return false
+  }
+  ids.clear()
   return value.tokens.every(token => {
     if (!record(token) || typeof token.id !== 'string' || !token.id || ids.has(token.id)) return false
     if (typeof token.name !== 'string' || !token.name.trim() || token.name.length > MAX_NAME_LENGTH) return false
+    if (token.visible !== undefined && typeof token.visible !== 'boolean') return false
     if (!finite(token.x) || !finite(token.y) || !Number.isInteger(token.x) || !Number.isInteger(token.y) || Math.abs(token.x) > MAX_CELL || Math.abs(token.y) > MAX_CELL) return false
     ids.add(token.id)
     return true
