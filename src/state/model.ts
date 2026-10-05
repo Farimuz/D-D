@@ -2,7 +2,7 @@ export interface Point { x: number; y: number }
 
 // Token coordinates are integer cell indices; camera coordinates are world pixels.
 // Missing visibility in v0.0.1/v0.0.2 means public; loading does not rewrite data.
-export interface Token extends Point { id: string; name: string; visible?: boolean }
+export interface Token extends Point { id: string; name: string; visible?: boolean; ownerId?: string | null }
 export interface MapAsset extends Point { id: string; width: number; height: number; scale: number }
 export interface Rectangle extends Point { width: number; height: number }
 export interface FogRegion extends Rectangle { id: string }

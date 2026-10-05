@@ -1,27 +1,35 @@
 {
   "name": "dnd-local-board",
   "private": true,
-  "version": "0.0.3",
+  "version": "0.0.4",
   "type": "module",
   "engines": { "node": ">=22.18.0" },
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
+    "dev": "node scripts/dev.mjs",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview --host 0.0.0.0",
-    "test": "npm run test:unit && npm run test:e2e",
+    "preview": "node server/index.ts --port 4173",
+    "test": "npm run test:unit && npm run test:integration && npm run test:e2e && npm run test:multiplayer",
     "test:unit": "node --test tests/unit/*.test.ts",
     "pretest:e2e": "npm run build",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "server": "node server/index.ts",
+    "start": "node server/index.ts",
+    "test:integration": "node --test tests/integration/*.test.ts",
+    "test:multiplayer": "playwright test -c playwright.multiplayer.config.ts",
+    "pretest:multiplayer": "npm run build"
   },
   "dependencies": {
+    "image-size": "2.0.4",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
     "@types/node": "26.6.4",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@types/ws": "8.18.2",
     "@vitejs/plugin-react": "6.0.4",
     "typescript": "7.0.2",
     "vite": "8.1.5"

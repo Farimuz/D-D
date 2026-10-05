@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { readMap } from '../storage/mapAssets'
 import { validateImage } from './mapAsset'
 
-export function useMapImage(id: string | undefined) {
+export function useMapImage(id: string | undefined, remoteUrl?: string | null) {
   const [image, setImage] = useState<{ id: string; url: string } | null>(null)
   const [warning, setWarning] = useState<string | null>(null)
   useEffect(() => {
@@ -10,6 +10,7 @@ export function useMapImage(id: string | undefined) {
     let url: string | null = null
     setImage(null)
     setWarning(null)
+    if (remoteUrl !== undefined) return
     if (id) void (async () => {
       try {
         const blob = await readMap(id)
@@ -23,6 +24,6 @@ export function useMapImage(id: string | undefined) {
       }
     })()
     return () => { cancelled = true; if (url) URL.revokeObjectURL(url) }
-  }, [id])
-  return { url: image && image.id === id ? image.url : null, warning }
+  }, [id, remoteUrl])
+  return remoteUrl !== undefined ? { url: remoteUrl, warning: null } : { url: image && image.id === id ? image.url : null, warning }
 }
