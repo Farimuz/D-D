@@ -8,6 +8,77 @@ No es una especificación inmutable. Debe actualizarse cuando la implementación
 
 La base es `main` en `78e4b4f`, incluida la corrección de medición local para jugadores online. Antes de extraer el dominio se corrigió un defecto de aislamiento en los tests multijugador: los 13 casos acumulaban salas en un único servidor, cuyo límite de producción es 10. La fixture ahora abre y cierra un servidor en memoria por caso. Se conservan todos los escenarios y el límite del producto; esta corrección no cambia la aplicación.
 
+## Implementación actual — fase A
+
+La fase A de v0.0.5 extrae el dominio y conserva el comportamiento y protocolo de v0.0.4. Las salas, accesos y mapas siguen siendo temporales en memoria. Reiniciar Node todavía los pierde. No se incorporaron SQLite, filesystem persistente, despliegues ni funciones visibles.
+
+### Estructura anterior y actual
+
+| Antes | Ahora |
+| --- | --- |
+| `server/rooms.ts`: estado, permisos, mutaciones, proyecciones, crypto y conexiones | `src/core/room/{types,domain,validation}.ts`: estado neutral, acciones, permisos, mutaciones y proyecciones; `server/rooms.ts`: acceso y coordinación del runtime |
+| `src/online/protocol.ts`: acciones de dominio y mensajes de transporte juntos | Core define acciones y estado; protocolo conserva envelopes, join, validación de mensajes y reexportaciones compatibles |
+| `src/state/storage.ts`: validación y almacenamiento local juntos | `src/state/validation.ts`: validación pura; storage conserva carga/guardado del navegador y su API |
+| `src/map/mapAsset.ts`: límites junto a decodificación del navegador | `src/map/limits.ts`: constantes neutrales; mapAsset conserva validación de Blob/imagen |
+| Estado autoritativo en el objeto Node de sala | `src/core/room/store.ts`: contrato mínimo; `src/infrastructure/memory/roomStore.ts`: implementación en memoria |
+| Mutación de metadata del mapa dentro del handler HTTP | HTTP autentica y valida bytes; core valida y reemplaza metadata; Node confirma estado y bytes antes de distribuir |
+
+### Core y autoridad
+
+`RoomState` contiene únicamente ID de sala, board compartido, revisión y participantes `{id, name}`. No contiene credenciales, hashes, sockets, bytes, cámara, zoom ni medición. Los participantes desconectados permanecen en ese estado para conservar asignaciones y contar hacia el límite de diez identidades.
+
+`createRoomState` remapea IDs importados y limpia asignaciones. `registerParticipant` incorpora o renombra una identidad ya resuelta por el adaptador sin incrementar revisión. `applyAction` valida, comprueba permisos actuales y devuelve `{state, tokenId?}` o un `RoomError`; nunca modifica su entrada ni hace broadcast. Cada acción aceptada incrementa la revisión una vez. `replaceMap` es una operación interna sobre metadata validada, no una acción nueva del protocolo.
+
+El adaptador entrega un actor autenticado y una función para generar IDs. El core comprueba que el participante pertenece a la sala; esta comprobación no sustituye la autenticación. Node conserva credenciales DM de 256 bits, hashes de identidad, comparación segura y enlace entre socket y actor. Ninguna acción del cliente puede elegir autoridad.
+
+`projectRoom` recibe presencia calculada por el runtime y devuelve datos separados de la entrada. El DM obtiene todos los tokens y participantes; el jugador obtiene solo tokens públicos cuyo centro de casilla no esté cubierto por niebla, sin nombres de otros participantes ni datos de acceso. `server/rooms.ts` añade el envelope `type: 'state'` y `server/app.ts` distribuye el resultado.
+
+### Almacén y consistencia actuales
+
+`RoomStore` tiene solo `load(roomId)`, `save(state)` y `delete(roomId)`. Es síncrono en esta fase: guardar reemplaza el estado completo o falla sin alterarlo; los datos que cruzan la frontera son JSON separado de los objetos internos del almacén. MemoryRoomStore copia al guardar y cargar. El objeto Node de sala ofrece lecturas de board/revisión desde ese almacén, sin mantener un segundo board autoritativo.
+
+Las acciones se aplican al estado recién cargado. Node guarda antes de confirmar, actualizar actividad o emitir proyecciones. Los parches conservan campos no modificados; gana la última acción válida procesada. Cargar, transformar, guardar y confirmar no tienen `await`, por lo que no se intercalan mutaciones en ese tramo del runtime actual. Este contrato no promete transacciones distribuidas ni admite un adaptador asíncrono sin adaptar la coordinación.
+
+Los IDs y geometría de mapas pertenecen al estado neutral; `ImageAsset {id, bytes, type}` sigue en el objeto Node de sala. HTTP mantiene firma/dimensiones, límite de 25 MiB, comprobaciones EXIF y exclusión de subidas simultáneas. Tras validar, core produce metadata nueva; Node guarda y sustituye los bytes en el mismo tramo síncrono. Si falla el guardado, conserva metadata, bytes y revisión anteriores; libera el bloqueo y permite reintentar. Borrar mapa o resetear libera bytes solo después de guardar. La expiración y el cierre eliminan también la entrada del almacén en memoria.
+
+### Qué permanece en Node
+
+- HTTP, binarios, headers, rutas, puertos y lectura del frontend construido.
+- WebSocket, sesiones, envío/broadcast, límites de frames, heartbeat y timeouts.
+- Generación criptográfica de códigos/IDs y credenciales; hashes y autenticación.
+- Presencia, recuentos de conexiones, reloj, inactividad de treinta minutos y ciclo de vida.
+- Diez salas por proceso, cuatro conexiones por identidad/DM y 512 sockets; el core conserva los límites de diez participantes, 200 fichas, 1000 regiones y geometría válida de mapas.
+
+No se creó un framework de realtime, contenedor de DI, event bus, ORM ni AssetStore anticipado.
+
+### Pruebas de la extracción
+
+Se añadieron once tests de core/memoria: escenario DM+A+B, permisos, entrada inmutable, revisiones, referencias inválidas, proyecciones, niebla/Solo DM, límites, cambios ordenados, mapas e independencia de referencias del almacén. El escenario se compila como bundle autocontenido y se ejecuta sin `process`, `require`, `Buffer`, WebSocket, APIs del navegador, red, crypto, reloj ni timers. La compilación rechaza dependencias externas en ese grafo.
+
+Cuatro tests adicionales del adaptador verifican un RoomStore alternativo de JSON, fallos de guardado, limpieza y límites de conexiones. Dos tests HTTP/WebSocket reales comprueban rechazo sin broadcast/revisión y recuperación de un mapa tras fallo del almacén. Los escenarios anteriores se conservan; la fixture del test de mapa antiguo ahora usa la operación de reemplazo en vez de mutar una lectura separada del almacén.
+
+La matriz mantiene 266 casos locales y 13 multijugador, incluida medición local del jugador en Chrome, Android e iPhone emulados. La evidencia de navegadores automatizados no acredita una prueba física en iOS/Android.
+
+Verificación final del 2026-10-05 sobre la implementación de `42e02ae`: `npm test` terminó con código 0 y conservó los 331 casos de la base, más 17 nuevos.
+
+| Suite | Casos aprobados |
+| --- | ---: |
+| Unidades, incluidos core y adaptadores | 60 |
+| Integración HTTP/WebSocket | 9 |
+| Compatibilidad local en seis perfiles | 266 |
+| Multijugador en tres perfiles | 13 |
+| **Total** | **348** |
+
+Sin fallos; unidades/integración sin cancelados ni omitidos, y Playwright sin reintentos. Los tres casos finales de medición de jugador pasaron. `npm run build` posterior también terminó con código 0 (TypeScript y Vite). Solo apareció el aviso ambiental de `NO_COLOR`/`FORCE_COLOR`; las comprobaciones de consola de la suite pasaron. La revisión confirmó validadores idénticos a la base, ausencia de dependencias de runtime en el grafo del core y ningún cambio en UI, protocolo observable o dependencias instaladas.
+
+### Pendiente para la fase B
+
+Implementar SQLite para estado y metadata de acceso privada del adaptador, más assets persistentes en filesystem. El contrato RoomStore solo cubre RoomState, incluidas referencias de mapa mediante ID y geometría. Hashes DM/jugador, actividad y bytes siguen fuera de ese estado: también deben recuperarse tras reinicio sin entrar en proyecciones.
+
+Definir esquema versionado y validación al cargar, transacciones y orden por sala (especialmente si se adopta IO asíncrono), publicación de assets por archivo temporal/rename y recuperación explícita de fallos entre archivo y referencia. Eliminar el asset anterior solo tras confirmar la nueva referencia. Añadir reinicio real, subidas interrumpidas, fallo de disco, huérfanos, migraciones, backup y restauración a las pruebas. Revisar además expiración y cierre: borrar memoria al detener Node no debe convertirse en borrado de salas durables al introducir SQLite.
+
+Las secciones siguientes conservan la dirección aprobada para v0.0.5 completa. SQLite, filesystem y recuperación tras reinicio son objetivos pendientes de la fase B, no capacidades construidas en la fase A.
+
 ## Objetivo
 
 D&D debe poder evolucionar sin que Oracle, Cloudflare, `ws`, SQLite, filesystem u otra tecnología de infraestructura se conviertan en el lugar donde vive la lógica del juego.
@@ -75,7 +146,7 @@ Responsable de:
 - eliminar;
 - migrar esquemas.
 
-Primero: SQLite.
+Primera implementación persistente prevista: SQLite (fase B).
 
 ### Assets
 
@@ -87,7 +158,7 @@ Responsable de:
 - reemplazo;
 - eliminación.
 
-Primero: filesystem.
+Primera implementación persistente prevista: filesystem (fase B).
 
 ### Realtime
 
@@ -302,7 +373,7 @@ Un flujo de sala debe poder probarse con adaptadores en memoria:
 
 La implementación Node debe ejecutar el mismo conjunto conceptual contra sus adaptadores reales.
 
-## Definición de éxito para v0.0.5
+## Definición de éxito para v0.0.5 completa (fases A + B)
 
 La arquitectura se considerará suficientemente desacoplada cuando:
 

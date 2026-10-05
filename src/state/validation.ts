@@ -36,4 +36,3 @@ export function isBoardState(value: unknown): value is BoardState {
     return true
   })
 }
-
