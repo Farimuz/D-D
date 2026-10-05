@@ -13,19 +13,31 @@ export function useBoard() {
   const current = useRef(board)
   const blocked = useRef(initial.blocked)
 
-  function change(update: (previous: BoardState) => BoardState, resetStorage = false) {
+  function change(update: (previous: BoardState) => BoardState, resetStorage = false, requireStorage = false): boolean {
     const next = update(current.current)
-    current.current = next
-    setBoard(next)
-    if (resetStorage) blocked.current = false
-    if (blocked.current) return
+    let saved = false
+    if (blocked.current && !resetStorage) {
+      if (requireStorage) return false
+      current.current = next
+      setBoard(next)
+      return false
+    }
     try {
-      const saved = saveBoard(window.localStorage, next)
+      saved = saveBoard(window.localStorage, next)
       setWarning(saved ? null : 'No se pudo guardar. Los cambios están solo en esta sesión; no cierres la página si quieres conservarlos.')
     } catch {
       setWarning('El navegador no permite guardar. Los cambios durarán solo mientras esta página esté abierta.')
     }
+    // Do not remove/replace an asset until its new reference is durably saved.
+    if (requireStorage && !saved) {
+      setWarning('No se pudo guardar la mesa. La operación del mapa no se aplicó; la mesa anterior se conservó.')
+      return false
+    }
+    if (resetStorage) blocked.current = false
+    current.current = next
+    setBoard(next)
+    return saved
   }
 
-  return { board, warning, change }
+  return { board, warning, change, getBoard: () => current.current }
 }

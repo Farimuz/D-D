@@ -1,5 +1,6 @@
 import { emptyBoard, MAX_CELL, MAX_CAMERA, MAX_NAME_LENGTH, MAX_ZOOM, MIN_ZOOM } from './model.ts'
 import type { BoardState } from './model.ts'
+import { MIN_MAP_SCALE, MAX_MAP_SCALE, MAX_IMAGE_PIXELS } from '../map/mapAsset.ts'
 
 export const STORAGE_KEY = 'dnd.local-board.v1'
 export interface StorageLike { getItem(key: string): string | null; setItem(key: string, value: string): void }
@@ -12,6 +13,13 @@ export function isBoardState(value: unknown): value is BoardState {
   if (!record(value) || value.version !== 1 || !Array.isArray(value.tokens) || !record(value.camera)) return false
   if (!finite(value.zoom) || value.zoom < MIN_ZOOM || value.zoom > MAX_ZOOM) return false
   if (!finite(value.camera.x) || !finite(value.camera.y) || Math.abs(value.camera.x) > MAX_CAMERA || Math.abs(value.camera.y) > MAX_CAMERA) return false
+  if (value.map !== undefined && value.map !== null) {
+    const map = value.map
+    if (!record(map) || typeof map.id !== 'string' || !map.id || map.id.length > 128) return false
+    if (!finite(map.width) || !finite(map.height) || !Number.isInteger(map.width) || !Number.isInteger(map.height) || map.width < 1 || map.height < 1 || map.width * map.height > MAX_IMAGE_PIXELS) return false
+    if (!finite(map.x) || !finite(map.y) || Math.abs(map.x) > MAX_CAMERA || Math.abs(map.y) > MAX_CAMERA) return false
+    if (!finite(map.scale) || map.scale < MIN_MAP_SCALE || map.scale > MAX_MAP_SCALE) return false
+  }
   const ids = new Set<string>()
   return value.tokens.every(token => {
     if (!record(token) || typeof token.id !== 'string' || !token.id || ids.has(token.id)) return false
@@ -28,7 +36,8 @@ export function loadBoard(storage: Pick<StorageLike, 'getItem'>): LoadedBoard {
     if (saved === null) return { board: emptyBoard(), warning: null, blocked: false }
     const parsed: unknown = JSON.parse(saved)
     if (!isBoardState(parsed)) throw new Error('Invalid board')
-    return { board: parsed, warning: null, blocked: false }
+    // Explicit, read-only migration: existing tokens/camera are retained; no write on load.
+    return { board: { ...parsed, map: parsed.map ?? null }, warning: null, blocked: false }
   } catch {
     return {
       board: emptyBoard(), blocked: true,

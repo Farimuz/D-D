@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { emptyBoard, MAX_CELL } from '../../src/state/model.ts'
+import { emptyBoard, MAX_CELL, MIN_ZOOM } from '../../src/state/model.ts'
 import { cellCenter } from '../../src/map/geometry.ts'
 import { isBoardState, loadBoard, saveBoard, STORAGE_KEY } from '../../src/state/storage.ts'
 
@@ -46,4 +46,17 @@ test('validation rejects duplicate identities, fractions, nonfinite and out-of-r
     { ...emptyBoard(), zoom: NaN },
     { ...emptyBoard(), tokens: [{ ...token, x: 1_000_001 }] },
   ]) assert.equal(isBoardState(invalid), false)
+})
+
+
+test('old schema and exact tiny zoom persist without a schema change', () => {
+  for (const zoom of [0.5, 0.123456789, MIN_ZOOM]) {
+    let raw = ''
+    const board = { ...emptyBoard(), zoom }
+    const storage = { getItem: () => raw, setItem: (_key: string, value: string) => { raw = value } }
+    assert.equal(saveBoard(storage, board), true)
+    assert.deepEqual(loadBoard(storage).board, board)
+    assert.equal(loadBoard(storage).board.version, 1)
+  }
+  assert.equal(isBoardState({ ...emptyBoard(), zoom: MIN_ZOOM / 2 }), false)
 })

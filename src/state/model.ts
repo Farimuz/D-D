@@ -2,20 +2,25 @@ export interface Point { x: number; y: number }
 
 // Token coordinates are integer cell indices; camera coordinates are world pixels.
 export interface Token extends Point { id: string; name: string }
+export interface MapAsset extends Point { id: string; width: number; height: number; scale: number }
+export type BoardMode = 'normal' | 'map' | 'measure'
 export interface BoardState {
   version: 1
   tokens: Token[]
   camera: Point
   zoom: number
+  // Optional only for the saved v0.0.1 schema; loadBoard normalizes it to null.
+  map?: MapAsset | null
 }
 
 export const CELL_SIZE = 64
-export const MIN_ZOOM = 0.5
+export const MIN_ZOOM = 1e-9
 export const MAX_ZOOM = 2.5
 export const MAX_NAME_LENGTH = 60
 export const MAX_CELL = 1_000_000
-export const MAX_CAMERA = (MAX_CELL + 1) * CELL_SIZE
+// Leave room for cursor anchoring at the numerical zoom floor.
+export const MAX_CAMERA = 1e15
 
 export function emptyBoard(): BoardState {
-  return { version: 1, tokens: [], camera: { x: 32, y: 32 }, zoom: 1 }
+  return { version: 1, tokens: [], camera: { x: 32, y: 32 }, zoom: 1, map: null }
 }
