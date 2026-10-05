@@ -4,7 +4,7 @@
 
 React reutiliza la misma mesa para local, DM online y jugador. Local mantiene localStorage/IndexedDB; online usa una proyección recibida del único estado canónico de la sala y una cámara/zoom separados en el cliente. No guarda una copia completa alternativa de la partida. Servidor Node/TypeScript sin framework, HTTP nativo y [ws](https://github.com/websockets/ws). Las salas, participantes y bytes de mapas viven en memoria.
 
-Archivos: src/online/protocol.ts define contratos y validadores; server/rooms.ts aplica permisos/proyección; server/app.ts gestiona HTTP, WebSocket y heartbeat; src/online/useRoom.ts mantiene conexión y vista; src/online/session.ts guarda acceso local y transfiere mapas. scripts/dev.mjs inicia ambos procesos y los detiene juntos. Desarrollo usa /api y /socket mediante el proxy Vite, conservando Host y Origin.
+Archivos: src/online/protocol.ts define contratos y validadores; desde v0.0.5-A src/core/room aplica permisos/proyección y server/rooms.ts coordina estado y acceso; server/app.ts gestiona HTTP, WebSocket y heartbeat; src/online/useRoom.ts mantiene conexión y vista; src/online/session.ts guarda acceso local y transfiere mapas. scripts/dev.mjs inicia ambos procesos y los detiene juntos. Desarrollo usa /api y /socket mediante el proxy Vite, conservando Host y Origin. Véanse la [arquitectura vigente](architecture/portable-runtime.md) y la [auditoría de fase A](architecture/phase-a-audit.md).
 
 ## HTTP y mapas
 

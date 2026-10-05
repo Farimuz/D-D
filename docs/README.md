@@ -63,3 +63,4 @@ Estas decisiones forman historial. Si una decisión cambia en el futuro, es pref
 ## Arquitectura vigente
 
 - [Arquitectura portable de runtime](architecture/portable-runtime.md): fronteras entre core e infraestructura, persistencia, assets, realtime, concurrencia, migraciones, pruebas y adaptadores Node/Cloudflare.
+- [Auditoría destructiva de v0.0.5-A](architecture/phase-a-audit.md): hallazgos reproducidos, correcciones, evidencia independiente y condiciones para comenzar la persistencia de fase B.
