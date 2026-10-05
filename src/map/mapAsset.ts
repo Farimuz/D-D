@@ -1,10 +1,7 @@
 import type { MapAsset, Point } from '../state/model.ts'
 import { MAX_CAMERA } from '../state/model.ts'
-
-export const MAX_IMAGE_BYTES = 25 * 1024 * 1024
-export const MAX_IMAGE_PIXELS = 32_000_000
-export const MIN_MAP_SCALE = 0.005
-export const MAX_MAP_SCALE = 16
+import { MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MIN_MAP_SCALE, MAX_MAP_SCALE } from './limits.ts'
+export { MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MIN_MAP_SCALE, MAX_MAP_SCALE } from './limits.ts'
 
 export function imageType(bytes: Uint8Array): string | null {
   if ([137, 80, 78, 71, 13, 10, 26, 10].every((byte, i) => bytes[i] === byte)) return 'image/png'
