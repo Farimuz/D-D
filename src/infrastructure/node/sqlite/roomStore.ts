@@ -5,21 +5,13 @@ import { randomUUID } from 'node:crypto'
 import type { RoomState } from '../../../core/room/types.ts'
 import { RoomError } from '../../../core/room/domain.ts'
 import { id, keys, record, validRoomState } from '../../../core/room/validation.ts'
-import { MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS } from '../../../map/limits.ts'
+import { ASSET_ID, validAsset } from '../assetMetadata.ts'
 import { CommitUncertainError, PersistenceError } from '../persistence.ts'
 import type { AssetMetadata, DurableRoomStore, FaultInjector, PrivateAccess } from '../persistence.ts'
 import { ManagedDirectory } from '../filesystem/managedDirectory.ts'
 import { initializeSchema } from './schema.ts'
 
 const hash = (v: unknown): v is string => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v)
-export const ASSET_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
-export function validAsset(v: unknown): v is AssetMetadata {
-  return record(v) && keys(v, ['id', 'type', 'byteLength', 'sha256', 'width', 'height'])
-    && typeof v.id === 'string' && ASSET_ID.test(v.id) && ['image/png', 'image/jpeg', 'image/webp'].includes(String(v.type))
-    && Number.isSafeInteger(v.byteLength) && Number(v.byteLength) > 0 && Number(v.byteLength) <= MAX_IMAGE_BYTES && hash(v.sha256)
-    && Number.isInteger(v.width) && Number(v.width) > 0 && Number.isInteger(v.height) && Number(v.height) > 0
-    && Number(v.width) * Number(v.height) <= MAX_IMAGE_PIXELS
-}
 function validAccess(v: unknown, state: RoomState): v is PrivateAccess {
   if (!record(v) || !keys(v, ['dmHash', 'identities', 'lastActive']) || !hash(v.dmHash)
     || !Number.isSafeInteger(v.lastActive) || Number(v.lastActive) < 0 || !Array.isArray(v.identities) || v.identities.length !== state.participants.length) return false
@@ -36,6 +28,7 @@ export class SQLiteRoomStore implements DurableRoomStore {
   readonly durable = true as const
   readonly path: string
   private readonly directory: ManagedDirectory
+  private readonly fileIdentity: { dev: bigint; ino: bigint }
   private readonly db: DatabaseSync
   private readonly fault: FaultInjector
   private readonly readOnly: boolean
@@ -51,10 +44,15 @@ export class SQLiteRoomStore implements DurableRoomStore {
     try {
       const file = this.directory.file(basename(this.path))
       if (!existsSync(file) && !this.readOnly) closeSync(openSync(file, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR, 0o600))
-      this.directory.regular(basename(this.path))
+      this.fileIdentity = this.directory.regular(basename(this.path))
+      for (const suffix of ['-wal', '-shm']) {
+        try { this.directory.regular(basename(this.path) + suffix) }
+        catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e }
+      }
       this.db = new DatabaseSync(file, { readOnly: this.readOnly, enableForeignKeyConstraints: true, enableDoubleQuotedStringLiterals: false, allowExtension: false })
       try {
         initializeSchema(this.db, this.readOnly, this.fault)
+        void this.storageIdentity
         if (!this.readOnly) this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=250;')
         this.records()
       } catch (e) { this.db.close(); throw e }
@@ -64,6 +62,14 @@ export class SQLiteRoomStore implements DurableRoomStore {
     if (this.uncertain) throw new CommitUncertainError('reopen-required')
     this.directory.assert()
     if (!this.db.isOpen) throw new PersistenceError('CLOSED', 'unchanged')
+    const stat = this.directory.regular(basename(this.path))
+    if (stat.dev !== this.fileIdentity.dev || stat.ino !== this.fileIdentity.ino) throw new PersistenceError('DATABASE_PATH_CHANGED', 'unchanged')
+  }
+  get storageIdentity(): string {
+    this.available()
+    const identity = this.db.prepare('SELECT value FROM storage_identity WHERE id = 1').get()?.value
+    if (typeof identity !== 'string' || !ASSET_ID.test(identity)) throw new PersistenceError('CORRUPT_STORAGE_IDENTITY', 'unchanged')
+    return identity
   }
   load(roomId: string): RoomState | null {
     this.available()
@@ -140,6 +146,14 @@ export class SQLiteRoomStore implements DurableRoomStore {
     this.db.prepare('INSERT INTO assets(id, content_type, byte_length, sha256, width, height) VALUES (?, ?, ?, ?, ?, ?)')
       .run(meta.id, meta.type, meta.byteLength, meta.sha256, meta.width, meta.height)
     this.dirty = true
+  }
+  pruneAssetMetadata(): undefined {
+    if (!this.inTransaction) { this.transaction(() => this.pruneAssetMetadata()); return }
+    const referenced = new Set(this.records().flatMap(({ state }) => state.board.map ? [state.board.map.id] : []))
+    for (const row of this.db.prepare('SELECT id FROM assets').all()) if (!referenced.has(String(row.id))) {
+      this.db.prepare('DELETE FROM assets WHERE id = ?').run(row.id!)
+      this.dirty = true
+    }
   }
   private validateReference(state: RoomState, access: PrivateAccess | null) {
     if (!access || !state.board.map) return

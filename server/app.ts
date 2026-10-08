@@ -13,6 +13,7 @@ import type { Actor, Room } from './rooms.ts'
 import type { RoomStore } from '../src/core/room/store.ts'
 import type { RoomState } from '../src/core/room/types.ts'
 import { CommitUncertainError, PersistenceError } from '../src/infrastructure/node/persistence.ts'
+import type { AssetStore } from '../src/infrastructure/node/persistence.ts'
 
 class HttpError extends Error {
   status: number
@@ -45,8 +46,8 @@ const json = (res: ServerResponse, status: number, data: unknown) => {
 }
 const parseJSON = (s: string) => { try { return JSON.parse(s) as unknown } catch { throw new HttpError(400, 'JSON no válido.') } }
 
-export function createRoomServer(options: { dist?: string; heartbeatMs?: number; joinTimeoutMs?: number; roomStore?: RoomStore } = {}) {
-  const rooms = new Rooms(options.roomStore)
+export function createRoomServer(options: { dist?: string; heartbeatMs?: number; joinTimeoutMs?: number; roomStore?: RoomStore; assetStore?: AssetStore } = {}) {
+  const rooms = new Rooms(options.roomStore, options.assetStore)
   const sessions = new Map<WebSocket, { room: Room; actor: Actor }>()
   const alive = new Set<WebSocket>()
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES, perMessageDeflate: false })
@@ -109,7 +110,8 @@ export function createRoomServer(options: { dist?: string; heartbeatMs?: number;
           if (!matching || !dimensions.width || !dimensions.height || dimensions.width * dimensions.height > MAX_IMAGE_PIXELS) throw new HttpError(400, 'El mapa debe tener como máximo 32 millones de píxeles y dimensiones verificables.')
           const candidate = { ...room.board, map: { ...layout, id: randomUUID() } }
           if (!validShared(candidate)) throw new HttpError(400, 'La posición o escala del mapa no son válidas.')
-          // Commit bytes and metadata together, then broadcast. A failed upload retains both.
+          // Prepare bytes, confirm the reference, then broadcast. SQLite and
+          // filesystem use ordered recovery, not a shared atomic transaction.
           const committed = rooms.replaceMap(room, { role: 'dm', id: null }, candidate.map, { id: candidate.map.id, bytes, type })
           broadcast(room, committed)
           json(res, 200, { map: committed.board.map })

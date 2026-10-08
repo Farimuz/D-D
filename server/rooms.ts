@@ -7,7 +7,7 @@ import type { Actor, RoomState, SharedBoard } from '../src/core/room/types.ts'
 import type { RoomStore } from '../src/core/room/store.ts'
 import { MemoryRoomStore } from '../src/infrastructure/memory/roomStore.ts'
 import { isDurable, PersistenceError } from '../src/infrastructure/node/persistence.ts'
-import type { DurableRoomStore, PrivateAccess } from '../src/infrastructure/node/persistence.ts'
+import type { AssetMetadata, AssetStore, DurableRoomStore, PrivateAccess, RecoveryReport } from '../src/infrastructure/node/persistence.ts'
 import type { Action, Join, Snapshot } from '../src/online/protocol.ts'
 export { RoomError } from '../src/core/room/domain.ts'
 export type { Actor } from '../src/core/room/types.ts'
@@ -25,7 +25,12 @@ export class Rooms {
   readonly rooms = new Map<string, Room>()
   private readonly store: RoomStore
   private readonly durableStore: DurableRoomStore | null
-  constructor(store: RoomStore = new MemoryRoomStore()) { this.store = store; this.durableStore = isDurable(store) ? store : null }
+  private readonly assets: AssetStore | null
+  maintenanceError: unknown = null
+  constructor(store: RoomStore = new MemoryRoomStore(), assets?: AssetStore) {
+    this.store = store; this.durableStore = isDurable(store) ? store : null; this.assets = assets ?? null
+    if (assets && (!this.durableStore || assets.storageIdentity !== this.durableStore.storageIdentity)) throw new PersistenceError('ASSET_DIRECTORY_OWNER', 'unchanged')
+  }
   private coordinate<T>(work: () => T): T { return this.durableStore ? this.durableStore.transaction(work) : work() }
   private privateAccess(room: Room): PrivateAccess | null {
     if (!this.durableStore) return null
@@ -39,11 +44,21 @@ export class Rooms {
   }
   private runtime(id: string, credentialHash: Buffer, lastActive: number, identities: PrivateAccess['identities']): Room {
     const owner = this
+    let memoryImage: ImageAsset | null = null
     const room: Room = { id, credentialHash,
       // These are views of the store, never a second authoritative board.
       get board() { return owner.read(room).board }, get revision() { return owner.read(room).revision },
       members: new Map(identities.map(identity => [identity.id, { ...identity, connected: false, connections: 0 }])),
-      dmConnections: 0, lastActive, image: null, uploading: false }
+      dmConnections: 0, lastActive, uploading: false,
+      get image() {
+        if (!owner.assets || !owner.durableStore) return memoryImage
+        const map = owner.read(room).board.map
+        if (!map) return null
+        const metadata = owner.durableStore.loadAsset(map.id)
+        if (!metadata) throw new PersistenceError('CORRUPT_ASSET_REFERENCE', 'unchanged')
+        return { id: map.id, bytes: Buffer.from(owner.assets.read(metadata)), type: metadata.type }
+      }, set image(value) { memoryImage = value },
+    }
     this.rooms.set(id, room)
     return room
   }
@@ -130,19 +145,35 @@ export class Rooms {
     }) }
   }
   apply(room: Room, actor: Actor, action: Action): { state: RoomState; tokenId?: string } {
+    let previousMap: string | undefined
     const result = this.coordinate(() => {
       const access = this.privateAccess(room)
-      const next = applyAction(this.read(room), actor, action, randomUUID)
+      const current = this.read(room); previousMap = current.board.map?.id
+      const next = applyAction(current, actor, action, randomUUID)
       this.saveActive(next.state, access)
       return next
     })
     if (!result.state.board.map) room.image = null
     room.lastActive = Date.now()
+    if (previousMap && !result.state.board.map) this.tryCleanupAssets()
     return result
   }
   replaceMap(room: Room, actor: Actor, map: MapAsset, image: ImageAsset) {
     if (image.id !== map.id) throw new Error('Asset reference mismatch')
-    if (this.durableStore) throw new PersistenceError('ASSETS_REQUIRED', 'unchanged')
+    if (this.durableStore) {
+      if (!this.assets) throw new PersistenceError('ASSETS_REQUIRED', 'unchanged')
+      const next = this.coordinate(() => {
+        const access = this.privateAccess(room)
+        const state = replaceMap(this.read(room), actor, map)
+        const metadata = this.assets!.prepare(image.id, image.bytes, image.type)
+        this.durableStore!.saveAsset(metadata)
+        this.saveActive(state, access)
+        return state
+      })
+      room.lastActive = Date.now()
+      this.tryCleanupAssets()
+      return next
+    }
     const next = replaceMap(this.read(room), actor, map)
     // Synchronous memory commit: failed save retains the old metadata and bytes.
     this.store.save(next)
@@ -159,6 +190,25 @@ export class Rooms {
   delete(id: string) {
     this.store.delete(id)
     this.rooms.delete(id)
+    this.tryCleanupAssets()
+  }
+  recoverAssets(): RecoveryReport {
+    if (!this.durableStore || !this.assets) return { removed: [], retained: [], unknown: [] }
+    return this.coordinate(() => {
+      const references = new Map<string, AssetMetadata>()
+      for (const { state } of this.durableStore!.records()) if (state.board.map) {
+        const metadata = this.durableStore!.loadAsset(state.board.map.id)
+        if (!metadata) throw new PersistenceError('CORRUPT_ASSET_REFERENCE', 'unchanged')
+        references.set(metadata.id, metadata)
+      }
+      const report = this.assets!.recover(references)
+      this.durableStore!.pruneAssetMetadata()
+      return report
+    })
+  }
+  private tryCleanupAssets() {
+    // Cleanup happens after confirmation and can never turn success into rejection.
+    try { this.recoverAssets(); this.maintenanceError = null } catch (error) { this.maintenanceError = error }
   }
   releaseRuntime() {
     // Shutdown releases this runtime's access/presence/bytes, never domain records.

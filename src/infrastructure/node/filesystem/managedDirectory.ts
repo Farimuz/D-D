@@ -1,4 +1,4 @@
-import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync } from 'node:fs'
+import { closeSync, constants, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync } from 'node:fs'
 import { dirname, join, parse, relative, resolve } from 'node:path'
 import { PersistenceError } from '../persistence.ts'
 import type { FaultInjector } from '../persistence.ts'
@@ -51,6 +51,13 @@ export class ManagedDirectory {
     const stat = lstatSync(this.file(name), { bigint: true })
     if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n) throw new PersistenceError('UNSAFE_FILE', 'unchanged')
     return stat
+  }
+  sync() {
+    this.assert()
+    // NTFS flushes files through fsync/FlushFileBuffers; Node cannot portably
+    // flush directory handles on Windows. Linux additionally syncs the directory.
+    if (process.platform !== 'win32') fsyncSync(this.descriptor)
+    this.assert()
   }
   close() { if (this.descriptor >= 0) { closeSync(this.descriptor); this.descriptor = -1 } }
 }
