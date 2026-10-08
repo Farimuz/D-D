@@ -10,3 +10,9 @@ playwright-report/
 .DS_Store
 Thumbs.db
 Desktop.ini
+.dnd-data/
+.dnd-backups/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal

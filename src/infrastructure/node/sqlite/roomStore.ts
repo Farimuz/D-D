@@ -12,6 +12,7 @@ import { ManagedDirectory } from '../filesystem/managedDirectory.ts'
 import { initializeSchema } from './schema.ts'
 
 const hash = (v: unknown): v is string => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v)
+const processNonce = randomUUID()
 function validAccess(v: unknown, state: RoomState): v is PrivateAccess {
   if (!record(v) || !keys(v, ['dmHash', 'identities', 'lastActive']) || !hash(v.dmHash)
     || !Number.isSafeInteger(v.lastActive) || Number(v.lastActive) < 0 || !Array.isArray(v.identities) || v.identities.length !== state.participants.length) return false
@@ -210,12 +211,15 @@ export class SQLiteRoomStore implements DurableRoomStore {
     return this.transaction(() => {
       const lease = this.db.prepare('SELECT pid, nonce FROM runtime_lease WHERE id = 1').get()
       if (lease) {
-        if (!Number.isSafeInteger(lease.pid) || Number(lease.pid) < 1 || typeof lease.nonce !== 'string' || !ASSET_ID.test(lease.nonce)) throw new PersistenceError('CORRUPT_RUNTIME_LEASE', 'unchanged')
+        const nonces = typeof lease.nonce === 'string' ? lease.nonce.split(':') : []
+        if (!Number.isSafeInteger(lease.pid) || Number(lease.pid) < 1 || nonces.length < 1 || nonces.length > 2 || !nonces.every(nonce => ASSET_ID.test(nonce))) throw new PersistenceError('CORRUPT_RUNTIME_LEASE', 'unchanged')
         let alive = true
-        try { process.kill(Number(lease.pid), 0) } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ESRCH') alive = false }
+        // A fresh process that inherited the former PID has another boot nonce.
+        if (Number(lease.pid) === process.pid && nonces.length === 2 && nonces[0] !== processNonce) alive = false
+        else try { process.kill(Number(lease.pid), 0) } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ESRCH') alive = false }
         if (alive) throw new PersistenceError('RUNTIME_ACTIVE', 'unchanged')
       }
-      const nonce = randomUUID()
+      const nonce = `${processNonce}:${randomUUID()}`
       this.db.prepare('INSERT INTO runtime_lease(id, pid, nonce) VALUES(1, ?, ?) ON CONFLICT(id) DO UPDATE SET pid=excluded.pid, nonce=excluded.nonce').run(process.pid, nonce)
       this.dirty = true
       return nonce
