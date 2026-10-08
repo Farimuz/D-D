@@ -4,18 +4,20 @@ Proyecto para crear una herramienta propia que facilite organizar y jugar partid
 
 La idea es construir una experiencia sencilla de usar tanto en PC como en teléfono, especialmente pensada para reducir el trabajo del Dungeon Master.
 
-**v0.0.4 — Salas multijugador** conserva la mesa local y añade salas temporales: el DM comparte un enlace o código, los jugadores entran solo con un nombre y mueven sus fichas asignadas. Un servidor Node/TypeScript valida los permisos y sincroniza fichas, mapa y niebla mediante WebSocket. No hay cuentas ni almacenamiento permanente de salas.
+**v0.0.5 — Núcleo portable y persistencia Node (fases A + B)** conserva la mesa local y las salas multijugador de v0.0.4. El DM comparte un enlace o código y los jugadores mueven sus fichas asignadas. SQLite conserva salas y accesos privados; el filesystem conserva los mapas. Reiniciar el servidor con las mismas rutas recupera esos datos. La fase A está aprobada; la fase B está implementada y pendiente de auditoría independiente. No hay cuentas. El paquete conserva la versión 0.0.4 hasta una publicación de versión posterior.
 
 ## Ejecutar
 
 Requiere Node.js 22.18 o posterior y npm. Desde la raíz del repositorio:
 
 ```sh
-npm install
+npm ci
 npm run dev
 ```
 
 Este comando inicia Vite y el backend juntos (puerto 8787). El frontend usa un proxy HTTP/WebSocket del mismo origen. Abre la dirección que muestra Vite. Para probar en un teléfono en la misma red, usa la dirección `Network` del PC; el firewall debe permitir el puerto de desarrollo.
+
+El servidor usa modo durable por defecto: `.dnd-data/rooms.sqlite` y `.dnd-data/assets/`, excluidos de Git. Reutiliza ambos para recuperar una partida. Para sesiones temporales, usa `npm start -- --temporary` o configura `DND_STORAGE_MODE=temporary` antes de `npm run dev`. Las rutas y la operación de backup/restauración se describen en [persistencia de fase B](docs/architecture/phase-b-persistence.md).
 
 Crea fichas con **＋ Ficha**, arrástralas para moverlas y arrastra el fondo para desplazar la vista. Selecciona una ficha para cambiar su **Nombre**, **Duplicar** o eliminarla. Usa la rueda del ratón o dos dedos para hacer zoom anclado al cursor o al punto medio; dos dedos también desplazan la vista. Los botones **− / ＋** ajustan el zoom y **⌖** centra la ficha seleccionada o vuelve al origen. Se puede alejar por debajo del 50%; el máximo sigue siendo 250%. La selección se conserva al navegar, medir y ajustar mapas; **Escape** o **×** la retiran. Si añades un segundo dedo al arrastrar una ficha, su movimiento pendiente se cancela antes de navegar.
 
@@ -37,7 +39,7 @@ El DM ve los participantes conectados/desconectados en **☰**. Selecciona una f
 
 La identidad del jugador y el acceso privado del DM se guardan en ese navegador y dirección. Recargar o reconectar recupera el participante y sus asignaciones mientras exista la sala. **Conectado / Reconectando… / Desconectado** indica el estado; no se acumulan ediciones offline para reenviarlas. Volver a **Mesa local** recupera tus datos locales.
 
-**Reiniciar el servidor elimina todas las salas y mapas online.** Una sala sin ninguna conexión caduca después de 30 minutos. Se admiten 10 jugadores por sala, 200 fichas y 1000 regiones de niebla. El mapa se transmite como binario por HTTP, con los mismos límites de 25 MiB y 32 millones de píxeles. El mapa completo llega al jugador: **la niebla es protección visual, no una frontera anti-trampas**. No expongas esta versión experimental a una red no confiable como si fuera un servicio endurecido.
+En modo durable, reiniciar Node conserva salas, asignaciones, niebla, revisión, accesos y mapas; las conexiones empiezan de cero. Treinta minutos sin conexiones liberan memoria y permiten recuperar después la sala almacenada. Hay un máximo de diez salas activas y diez jugadores por sala, 200 fichas y 1000 regiones de niebla. En modo temporal, reiniciar sí elimina las salas y la inactividad conserva la caducidad anterior. El mapa se transmite como binario por HTTP, con los mismos límites de 25 MiB y 32 millones de píxeles. El mapa completo llega al jugador: **la niebla es protección visual, no una frontera anti-trampas**. No expongas esta versión experimental a una red no confiable como si fuera un servicio endurecido.
 
 Para probar con un teléfono, abre la URL **Network** de Vite en la misma Wi-Fi y crea la sala usando esa dirección también en el PC; así el enlace compartido incluye la IP del PC. La prueba emulada de iPhone no sustituye Safari en un dispositivo físico. Consulta [arquitectura, protocolo y límites](docs/multiplayer.md).
 
@@ -53,14 +55,24 @@ En modo local, la niebla y la visibilidad se guardan junto a la mesa en `localSt
 
 Esta preview **no es una frontera de seguridad**: los datos completos siguen en el navegador local. No comparte una partida ni protege secretos frente a alguien con acceso a ese navegador. El revelado geométrico puede fragmentar regiones después de muchas operaciones; no hay pinceles, visión automática ni iluminación dinámica.
 
-## Producción
+## Build y servidor
 
 ```sh
 npm run build
 npm run preview
 ```
 
-El build genera el frontend en `dist/`; el servidor Node sirve esos archivos, las rutas `/room/...`, HTTP de mapas y WebSocket. `npm run preview` escucha en 4173; `npm start` usa 8787. Ambos conservan salas solo mientras ese proceso siga vivo. `npm run dev` reinicia el frontend automáticamente; tras editar el backend, reinicia el comando completo.
+El build genera el frontend en `dist/`; el servidor Node sirve esos archivos, las rutas `/room/...`, HTTP de mapas y WebSocket. `npm run preview` escucha en 4173; `npm start` usa 8787. Ambos usan las mismas rutas durables por defecto; ejecuta un único servidor por base SQLite. `npm run dev` reinicia el frontend automáticamente; tras editar el backend, reinicia el comando completo.
+
+Un backup manual incluye una instantánea consistente de SQLite y sus mapas referenciados. El comando imprime la carpeta creada:
+
+```sh
+npm run storage -- backup
+npm run storage -- restore --backup ".dnd-backups/<copia>" --target ".dnd-data/restore-01"
+npm start -- --data-dir ".dnd-data/restore-01"
+```
+
+Sustituye `<copia>` por la carpeta impresa. El destino de restauración debe ser nuevo y su padre debe existir. Consulta [configuración, recuperación y límites](docs/architecture/phase-b-persistence.md) antes de operar sobre datos durables.
 
 ## Pruebas
 

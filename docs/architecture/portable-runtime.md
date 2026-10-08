@@ -4,6 +4,16 @@ Este documento describe el diseño vivo derivado de la decisión [0003 — Núcl
 
 No es una especificación inmutable. Debe actualizarse cuando la implementación real cambie.
 
+## Estado vigente — v0.0.5, fase B
+
+La fase B añade `SQLiteRoomStore`, `FilesystemAssetStore` y coordinación transaccional de estado/accesos/metadatos. El servidor Node arranca durable por defecto, recupera salas y mapas después de reinicios reales y ofrece backup consistente y restauración a una ubicación nueva. El core y el protocolo siguen independientes de Node, SQLite, filesystem y variables de entorno; `MemoryRoomStore` y el modo temporal permanecen disponibles.
+
+`BEGIN IMMEDIATE` y una versión de almacenamiento distinta de la revisión protegen escritores independientes. Las proyecciones se emiten desde el estado confirmado. Un resultado de commit incierto pone el almacén en cuarentena; los comandos no se reproducen automáticamente. La publicación ordenada de archivos y la recuperación conservadora resuelven interrupciones entre SQLite y filesystem sin prometer una transacción conjunta. Treinta minutos de inactividad durable liberan RAM y conservan el registro.
+
+Véase [Persistencia de fase B](phase-b-persistence.md) para esquema, accesos, migraciones, seguridad de rutas, crash recovery, configuración, backup/restauración, evidencia y límites. `FASE_B_IMPLEMENTED` es estado de implementación; la auditoría independiente está pendiente. Cloudflare y despliegues continúan fuera del alcance.
+
+Desde **Preparación de v0.0.5 — fase A**, el texto siguiente se conserva íntegramente como registro histórico de la extracción y del diseño aprobado. Sus referencias a capacidades pendientes describen el estado de fase A; la implementación vigente de B está documentada arriba y en el documento enlazado.
+
 ## Preparación de v0.0.5 — fase A
 
 La base es `main` en `78e4b4f`, incluida la corrección de medición local para jugadores online. Antes de extraer el dominio se corrigió un defecto de aislamiento en los tests multijugador: los 13 casos acumulaban salas en un único servidor, cuyo límite de producción es 10. La fixture ahora abre y cierra un servidor en memoria por caso. Se conservan todos los escenarios y el límite del producto; esta corrección no cambia la aplicación.

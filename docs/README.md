@@ -64,3 +64,4 @@ Estas decisiones forman historial. Si una decisión cambia en el futuro, es pref
 
 - [Arquitectura portable de runtime](architecture/portable-runtime.md): fronteras entre core e infraestructura, persistencia, assets, realtime, concurrencia, migraciones, pruebas y adaptadores Node/Cloudflare.
 - [Auditoría destructiva de v0.0.5-A](architecture/phase-a-audit.md): hallazgos reproducidos, correcciones, evidencia independiente y condiciones para comenzar la persistencia de fase B.
+- [Persistencia de v0.0.5-B](architecture/phase-b-persistence.md): implementación SQLite/filesystem, transacciones, identidad, reinicios reales, backup/restauración, configuración y evidencia de pruebas. Implementación pendiente de auditoría independiente.
