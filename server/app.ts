@@ -12,6 +12,7 @@ import { Rooms, RoomError } from './rooms.ts'
 import type { Actor, Room } from './rooms.ts'
 import type { RoomStore } from '../src/core/room/store.ts'
 import type { RoomState } from '../src/core/room/types.ts'
+import { CommitUncertainError, PersistenceError } from '../src/infrastructure/node/persistence.ts'
 
 class HttpError extends Error {
   status: number
@@ -131,7 +132,8 @@ export function createRoomServer(options: { dist?: string; heartbeatMs?: number;
       res.end(req.method === 'HEAD' ? undefined : bytes)
     } catch (error) {
       if (res.destroyed || res.headersSent) return
-      if (error instanceof HttpError) json(res, error.status, { message: error.message })
+      if (error instanceof CommitUncertainError) json(res, 503, { code: 'COMMIT_UNCERTAIN', message: 'No se pudo confirmar el resultado. Comprueba la sala después de reiniciar el servidor antes de repetir la operación.' })
+      else if (error instanceof HttpError) json(res, error.status, { message: error.message })
       else if (error instanceof RoomError) json(res, error.code === 'ROOM_NOT_FOUND' ? 404 : 409, { message: error.message, code: error.code })
       else json(res, 500, { message: 'No se pudo completar la operación.' })
     }
@@ -166,10 +168,14 @@ export function createRoomServer(options: { dist?: string; heartbeatMs?: number;
           broadcast(session.room, result.state)
           send(socket, { type: 'result', requestId: message.requestId, ok: true, ...(result.tokenId ? { tokenId: result.tokenId } : {}) })
         } catch (error) {
-          send(socket, { type: 'result', requestId: message.requestId, ok: false, message: error instanceof RoomError ? error.message : 'No se pudo aplicar la acción.' })
+          if (error instanceof CommitUncertainError) {
+            send(socket, { type: 'error', code: 'COMMIT_UNCERTAIN', message: 'El resultado quedó sin confirmar. Comprueba la sala después de reiniciar el servidor antes de repetir el cambio.' })
+            socket.close(1013, 'Commit sin confirmar')
+          } else send(socket, { type: 'result', requestId: message.requestId, ok: false, message: error instanceof RoomError ? error.message : 'No se pudo aplicar la acción.' })
         }
       } catch (error) {
-        send(socket, { type: 'error', code: error instanceof RoomError ? error.code : 'INVALID_MESSAGE', message: error instanceof RoomError ? error.message : 'Mensaje no válido.' })
+        send(socket, { type: 'error', code: error instanceof RoomError || error instanceof PersistenceError ? error.code : 'INVALID_MESSAGE',
+          message: error instanceof RoomError ? error.message : error instanceof PersistenceError ? 'No se pudo confirmar el acceso. Comprueba la sala cuando el almacenamiento esté disponible.' : 'Mensaje no válido.' })
         if (!sessions.has(socket)) socket.close(1008, 'Identificación rechazada')
       }
     })

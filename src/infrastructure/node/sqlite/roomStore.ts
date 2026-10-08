@@ -192,5 +192,26 @@ export class SQLiteRoomStore implements DurableRoomStore {
       throw new PersistenceError('WRITE', 'rolled-back', e)
     } finally { this.inTransaction = false; this.reads.clear(); this.changed.clear() }
   }
+  claimRuntime(): string {
+    return this.transaction(() => {
+      const lease = this.db.prepare('SELECT pid, nonce FROM runtime_lease WHERE id = 1').get()
+      if (lease) {
+        if (!Number.isSafeInteger(lease.pid) || Number(lease.pid) < 1 || typeof lease.nonce !== 'string' || !ASSET_ID.test(lease.nonce)) throw new PersistenceError('CORRUPT_RUNTIME_LEASE', 'unchanged')
+        let alive = true
+        try { process.kill(Number(lease.pid), 0) } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ESRCH') alive = false }
+        if (alive) throw new PersistenceError('RUNTIME_ACTIVE', 'unchanged')
+      }
+      const nonce = randomUUID()
+      this.db.prepare('INSERT INTO runtime_lease(id, pid, nonce) VALUES(1, ?, ?) ON CONFLICT(id) DO UPDATE SET pid=excluded.pid, nonce=excluded.nonce').run(process.pid, nonce)
+      this.dirty = true
+      return nonce
+    })
+  }
+  releaseRuntime(nonce: string) {
+    this.transaction(() => {
+      const result = this.db.prepare('DELETE FROM runtime_lease WHERE id = 1 AND nonce = ?').run(nonce)
+      this.dirty = Number(result.changes) > 0
+    })
+  }
   close() { if (this.db.isOpen) this.db.close(); this.directory.close() }
 }

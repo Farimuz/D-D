@@ -154,3 +154,26 @@ test('SQLite future schema is rejected without modifying its original database b
   assert.throws(() => new SQLiteRoomStore(path), /SCHEMA_VERSION/)
   assert.deepEqual(readFileSync(path), before)
 })
+
+test('SQLite runtime lease excludes another server and only its current owner releases it', t => {
+  const { store, path } = fixture(t), nonce = store.claimRuntime(), other = new SQLiteRoomStore(path)
+  try {
+    assert.throws(() => other.claimRuntime(), /RUNTIME_ACTIVE/)
+    store.releaseRuntime('foreign'); assert.throws(() => other.claimRuntime(), /RUNTIME_ACTIVE/)
+    store.releaseRuntime(nonce)
+    const second = other.claimRuntime()
+    store.releaseRuntime(nonce); assert.throws(() => store.claimRuntime(), /RUNTIME_ACTIVE/)
+    other.releaseRuntime(second)
+  } finally { other.close() }
+})
+
+test('SQLite failed rollback quarantines the connection and close rolls back unfinished state', t => {
+  let armed = false
+  const { store, path } = fixture(t, p => { if (armed && ['sqlite.commit', 'sqlite.rollback'].includes(p)) throw new Error('Rollback unavailable') })
+  store.save(initial()); armed = true
+  assert.throws(() => store.transaction(() => store.save(applyAction(store.load('ROOM')!, dm, { type: 'token.create', name: 'Uncommitted', x: 0, y: 0 }, () => 't').state)), CommitUncertainError)
+  assert.throws(() => store.load('ROOM'), CommitUncertainError)
+  store.close()
+  const restored = new SQLiteRoomStore(path)
+  try { assert.deepEqual(restored.load('ROOM'), initial()) } finally { restored.close() }
+})
