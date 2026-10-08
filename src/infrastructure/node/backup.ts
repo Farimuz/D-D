@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readSync, unlinkSync, writeSync } from 'node:fs'
-import { join, relative, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { SQLiteRoomStore } from './sqlite/roomStore.ts'
 import { SCHEMA_VERSION } from './sqlite/schema.ts'
@@ -142,7 +142,7 @@ function checkSnapshot(directory: ManagedDirectory, manifest: BackupManifest) {
 export async function createBackup(store: SQLiteRoomStore, assetsDirectory: string, backupDirectory: string, fault: FaultInjector = nothing): Promise<string> {
   const parentPath = resolve(backupDirectory), sourceAssetsPath = resolve(assetsDirectory)
   const inside = relative(sourceAssetsPath, parentPath)
-  if (inside === '' || !inside.startsWith('..') && !inside.includes(':')) throw new PersistenceError('BACKUP_PATH', 'unchanged')
+  if (inside === '' || inside !== '..' && !inside.startsWith('..' + sep) && !isAbsolute(inside)) throw new PersistenceError('BACKUP_PATH', 'unchanged')
   const parent = new ManagedDirectory(parentPath, fault)
   let bundle: ManagedDirectory | undefined
   try {
@@ -185,7 +185,7 @@ export async function restoreBackup(backupDirectory: string, destination: string
     checkSnapshot(source, manifest) // No target is touched until the whole source validates.
     const path = resolve(destination)
     const nested = relative(source.path, path)
-    if (nested === '' || !nested.startsWith('..') && !nested.includes(':')) throw new PersistenceError('RESTORE_PATH', 'unchanged')
+    if (nested === '' || nested !== '..' && !nested.startsWith('..' + sep) && !isAbsolute(nested)) throw new PersistenceError('RESTORE_PATH', 'unchanged')
     if (existsSync(path)) throw new PersistenceError('RESTORE_TARGET_EXISTS', 'unchanged')
     // The parent must already exist; only an exclusively created new target is owned.
     const parentPath = resolve(path, '..'), parent = new ManagedDirectory(parentPath, fault, false)

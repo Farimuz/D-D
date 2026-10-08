@@ -85,6 +85,10 @@ test('restore refuses existing targets, invalid manifests, missing/corrupt image
   mkdirSync(target); writeFileSync(join(target, 'original.txt'), 'Preserve me')
   await assert.rejects(restoreBackup(path, target), /RESTORE_TARGET_EXISTS/)
   assert.equal(readFileSync(join(target, 'original.txt'), 'utf8'), 'Preserve me')
+  await assert.rejects(createBackup(f.store, f.assetPath, join(f.assetPath, '..copies')), /BACKUP_PATH/)
+  assert.equal(existsSync(join(f.assetPath, '..copies')), false)
+  await assert.rejects(restoreBackup(path, join(path, '..restored')), /RESTORE_PATH/)
+  assert.equal(existsSync(join(path, '..restored')), false)
   const manifestPath = join(path, 'backup.json'), manifest = readFileSync(manifestPath)
   for (const change of [{ version: 99 }, { assets: [{ ...JSON.parse(manifest.toString()).assets[0], id: '../../foreign' }] }]) {
     writeFileSync(manifestPath, JSON.stringify({ ...JSON.parse(manifest.toString()), ...change }))

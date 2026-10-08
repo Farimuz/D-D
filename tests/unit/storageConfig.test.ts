@@ -15,4 +15,7 @@ test('Node storage defaults durable and accepts configurable database, assets, b
   assert.throws(() => storageConfiguration([], { DND_STORAGE_MODE: 'unknown' }, cwd), /temporary o durable/)
   assert.throws(() => storageConfiguration(['--assets-dir', 'saved', '--database', 'saved/db.sqlite'], {}, cwd), /fuera/)
   assert.throws(() => storageConfiguration(['--assets-dir', 'images', '--backup-dir', 'images/copies'], {}, cwd), /fuera/)
+  assert.throws(() => storageConfiguration(['--assets-dir', 'images', '--backup-dir', 'images/..copies'], {}, cwd), /fuera/)
+  assert.throws(() => storageConfiguration(['--assets-dir', 'images', '--database', 'images/..data/rooms.sqlite'], {}, cwd), /fuera/)
+  assert.equal(storageConfiguration(['--assets-dir', 'images', '--backup-dir', 'images/../copies'], {}, cwd).backupDirectory, join(cwd, 'copies'))
 })
