@@ -1,8 +1,8 @@
 import type { BoardState } from '../../state/model.ts'
 import { emptyBoard, MAX_CELL, MAX_NAME_LENGTH } from '../../state/model.ts'
 import { isBoardState } from '../../state/validation.ts'
-import { MAX_TOKENS, MAX_FOG } from './types.ts'
-import type { Action, SharedBoard } from './types.ts'
+import { MAX_TOKENS, MAX_FOG, MAX_PLAYERS } from './types.ts'
+import type { Action, RoomState, SharedBoard } from './types.ts'
 
 export const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 export const id = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 128
@@ -39,4 +39,16 @@ export function validAction(v: unknown): v is Action {
     case 'map.delete': case 'board.reset': return keys(v, ['type'])
     default: return false
   }
+}
+
+// Stored domain records have the same invariants as commands, without access data.
+export function validRoomState(v: unknown): v is RoomState {
+  if (!record(v) || !keys(v, ['id', 'board', 'revision', 'participants']) || !id(v.id) || !validShared(v.board)
+    || !Number.isSafeInteger(v.revision) || (v.revision as number) < 0 || !Array.isArray(v.participants) || v.participants.length > MAX_PLAYERS) return false
+  const ids = new Set<string>()
+  for (const p of v.participants) {
+    if (!record(p) || !keys(p, ['id', 'name']) || !id(p.id) || !name(p.name) || ids.has(p.id)) return false
+    ids.add(p.id)
+  }
+  return v.board.tokens.every(t => !t.ownerId || ids.has(t.ownerId))
 }
