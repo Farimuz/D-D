@@ -3,12 +3,18 @@ import { randomUUID } from 'node:crypto'
 import { PersistenceError } from '../persistence.ts'
 import type { FaultInjector } from '../persistence.ts'
 import { validRoomState } from '../../../core/room/validation.ts'
+import { validAccess } from '../privateAccess.ts'
+import { validAsset } from '../assetMetadata.ts'
 
 export const SCHEMA_VERSION = 3
 export function initializeSchema(db: DatabaseSync, readOnly: boolean, fault: FaultInjector) {
   const version = Number(db.prepare('PRAGMA user_version').get()!.user_version)
   if (!Number.isInteger(version) || version < 0 || version > SCHEMA_VERSION) throw new PersistenceError('SCHEMA_VERSION', 'unchanged')
   if (readOnly && version !== SCHEMA_VERSION) throw new PersistenceError('MIGRATION_REQUIRED', 'unchanged')
+  const migrating = version !== SCHEMA_VERSION
+  try { db.exec(migrating ? 'BEGIN IMMEDIATE' : 'BEGIN') } catch (e) { throw new PersistenceError('BUSY', 'unchanged', e) }
+  try {
+  if (Number(db.prepare('PRAGMA user_version').get()!.user_version) !== version) throw new PersistenceError('SCHEMA_CHANGED', 'unchanged')
   if (version === 0 && db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").get()) throw new PersistenceError('UNKNOWN_SCHEMA', 'unchanged')
   if (version > 0) {
     const columns = db.prepare('PRAGMA table_info(rooms)').all().map(row => row.name)
@@ -17,11 +23,24 @@ export function initializeSchema(db: DatabaseSync, readOnly: boolean, fault: Fau
       let state: unknown
       try { state = JSON.parse(String(row.state_json)) } catch { throw new PersistenceError('CORRUPT_STATE', 'unchanged') }
       if (!validRoomState(state) || state.id !== row.id || !Number.isSafeInteger(row.storage_version) || Number(row.storage_version) < 1) throw new PersistenceError('CORRUPT_STATE', 'unchanged')
+      if (version >= 2) {
+        const access = db.prepare('SELECT dm_hash, identities_json, last_active FROM room_access WHERE room_id=?').get(state.id)
+        if (access) {
+          let identities: unknown
+          try { identities = JSON.parse(String(access.identities_json)) } catch { throw new PersistenceError('CORRUPT_ACCESS', 'unchanged') }
+          if (!validAccess({ dmHash: access.dm_hash, identities, lastActive: access.last_active }, state)) throw new PersistenceError('CORRUPT_ACCESS', 'unchanged')
+          if (state.board.map) {
+            const meta = db.prepare('SELECT id, content_type AS type, byte_length AS byteLength, sha256, width, height FROM assets WHERE id=?').get(state.board.map.id), map = state.board.map
+            if (!validAsset(meta) || !(meta.width === map.width && meta.height === map.height || meta.width === map.height && meta.height === map.width)) throw new PersistenceError('CORRUPT_ASSET_REFERENCE', 'unchanged')
+          }
+        }
+      }
+    }
+    if (version >= 2) for (const meta of db.prepare('SELECT id, content_type AS type, byte_length AS byteLength, sha256, width, height FROM assets').all()) {
+      if (!validAsset(meta)) throw new PersistenceError('CORRUPT_ASSET_METADATA', 'unchanged')
     }
   }
-  if (version !== SCHEMA_VERSION) {
-    db.exec('BEGIN IMMEDIATE')
-    try {
+  if (migrating) {
       if (version === 0) db.exec(`CREATE TABLE rooms (
         id TEXT PRIMARY KEY, state_json TEXT NOT NULL, storage_version INTEGER NOT NULL CHECK(storage_version > 0)
       ) STRICT;`)
@@ -43,9 +62,14 @@ export function initializeSchema(db: DatabaseSync, readOnly: boolean, fault: Fau
         db.prepare('INSERT INTO storage_identity(id, value) VALUES(1, ?)').run(randomUUID())
       }
       fault('sqlite.migrate')
-      db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}; COMMIT`)
-    } catch (e) { if (db.isTransaction) db.exec('ROLLBACK'); throw new PersistenceError('MIGRATION', 'rolled-back', e) }
+      db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
   }
   const integrity = db.prepare('PRAGMA quick_check').all()
   if (integrity.length !== 1 || integrity[0].quick_check !== 'ok' || db.prepare('PRAGMA foreign_key_check').get()) throw new PersistenceError('CORRUPT_DATABASE', 'unchanged')
+  db.exec(migrating ? 'COMMIT' : 'ROLLBACK')
+  } catch (e) {
+    if (db.isTransaction) db.exec('ROLLBACK')
+    if (e instanceof PersistenceError) throw e
+    throw new PersistenceError(migrating ? 'MIGRATION' : 'SCHEMA_SHAPE', migrating ? 'rolled-back' : 'unchanged', e)
+  }
 }

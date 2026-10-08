@@ -177,3 +177,31 @@ test('SQLite failed rollback quarantines the connection and close rolls back unf
   const restored = new SQLiteRoomStore(path)
   try { assert.deepEqual(restored.load('ROOM'), initial()) } finally { restored.close() }
 })
+
+test('SQLite v2 migration preserves domain/private data and rolls back failed DDL; corrupt old access cannot advance the schema', t => {
+  const { store, path } = fixture(t)
+  store.transaction(() => { store.save(initial()); store.saveAccess('ROOM', access()) })
+  const before = store.records(); store.close()
+  const raw = new DatabaseSync(path); raw.exec('DROP TABLE storage_identity; PRAGMA user_version=2'); raw.close()
+  assert.throws(() => new SQLiteRoomStore(path, { fault: p => { if (p === 'sqlite.migrate') throw new Error('Migration interrupted') } }), /MIGRATION/)
+  const old = new DatabaseSync(path)
+  try {
+    assert.equal(old.prepare('PRAGMA user_version').get()!.user_version, 2)
+    assert.equal(old.prepare("SELECT name FROM sqlite_master WHERE name='storage_identity'").get(), undefined)
+    old.exec("UPDATE room_access SET identities_json='{broken'")
+  } finally { old.close() }
+  assert.throws(() => new SQLiteRoomStore(path), /CORRUPT_ACCESS/)
+  const repair = new DatabaseSync(path)
+  try { assert.equal(repair.prepare('PRAGMA user_version').get()!.user_version, 2); repair.prepare('UPDATE room_access SET identities_json=?').run('[]') } finally { repair.close() }
+  const migrated = new SQLiteRoomStore(path)
+  try { assert.deepEqual(migrated.records(), before); assert.match(migrated.storageIdentity, /^[a-f0-9-]{36}$/) } finally { migrated.close() }
+})
+
+test('SQLite failed explicit deletion preserves domain and private associations', t => {
+  let armed = false
+  const { store } = fixture(t, p => { if (armed && p === 'sqlite.delete') { armed = false; throw Object.assign(new Error('Delete denied'), { code: 'EACCES' }) } })
+  store.transaction(() => { store.save(initial()); store.saveAccess('ROOM', access()) })
+  const before = store.records(); armed = true; assert.throws(() => store.delete('ROOM'), /WRITE/)
+  assert.equal(armed, false); assert.deepEqual(store.records(), before)
+  store.delete('ROOM'); assert.equal(store.loadAccess('ROOM'), null); assert.equal(store.load('ROOM'), null)
+})

@@ -10,13 +10,16 @@ export class ManagedDirectory {
   readonly path: string
   private descriptor: number
   private readonly pins: Array<{ path: string; dev: bigint; ino: bigint }> = []
-  constructor(path: string, fault: FaultInjector = () => {}) {
+  constructor(path: string, fault: FaultInjector = () => {}, create = true) {
     this.path = resolve(path)
     fault('directory.open')
     const paths: string[] = []
     for (let cursor = this.path; ; cursor = dirname(cursor)) { paths.unshift(cursor); if (cursor === parse(cursor).root) break }
     for (const current of paths) {
-      if (!existsSync(current)) { try { mkdirSync(current, { mode: 0o700 }) } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e } }
+      if (!existsSync(current)) {
+        if (!create) throw new PersistenceError('DIRECTORY_MISSING', 'unchanged')
+        try { mkdirSync(current, { mode: 0o700 }) } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e }
+      }
       const stat = lstatSync(current, { bigint: true })
       if (!stat.isDirectory() || stat.isSymbolicLink()) throw new PersistenceError('PATH', 'unchanged')
       this.pins.push({ path: current, dev: stat.dev, ino: stat.ino })

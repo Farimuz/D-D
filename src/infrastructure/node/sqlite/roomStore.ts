@@ -1,29 +1,18 @@
-import { DatabaseSync } from 'node:sqlite'
+import { backup, DatabaseSync } from 'node:sqlite'
 import { closeSync, constants, existsSync, openSync } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { RoomState } from '../../../core/room/types.ts'
 import { RoomError } from '../../../core/room/domain.ts'
-import { id, keys, record, validRoomState } from '../../../core/room/validation.ts'
+import { validRoomState } from '../../../core/room/validation.ts'
+import { validAccess } from '../privateAccess.ts'
 import { ASSET_ID, validAsset } from '../assetMetadata.ts'
 import { CommitUncertainError, PersistenceError } from '../persistence.ts'
 import type { AssetMetadata, DurableRoomStore, FaultInjector, PrivateAccess } from '../persistence.ts'
 import { ManagedDirectory } from '../filesystem/managedDirectory.ts'
 import { initializeSchema } from './schema.ts'
 
-const hash = (v: unknown): v is string => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v)
 const processNonce = randomUUID()
-function validAccess(v: unknown, state: RoomState): v is PrivateAccess {
-  if (!record(v) || !keys(v, ['dmHash', 'identities', 'lastActive']) || !hash(v.dmHash)
-    || !Number.isSafeInteger(v.lastActive) || Number(v.lastActive) < 0 || !Array.isArray(v.identities) || v.identities.length !== state.participants.length) return false
-  const ids = new Set<string>(), hashes = new Set<string>()
-  for (const identity of v.identities) {
-    if (!record(identity) || !keys(identity, ['id', 'identityHash']) || !id(identity.id) || !hash(identity.identityHash)
-      || ids.has(identity.id) || hashes.has(identity.identityHash) || !state.participants.some(p => p.id === identity.id)) return false
-    ids.add(identity.id); hashes.add(identity.identityHash)
-  }
-  return true
-}
 
 export class SQLiteRoomStore implements DurableRoomStore {
   readonly durable = true as const
@@ -39,9 +28,10 @@ export class SQLiteRoomStore implements DurableRoomStore {
   private inTransaction = false
   private dirty = false
   private uncertain = false
+  private snapshotting = false
   constructor(path: string, options: { fault?: FaultInjector; readOnly?: boolean } = {}) {
     this.path = resolve(path); this.fault = options.fault ?? (() => {}); this.readOnly = options.readOnly ?? false
-    this.directory = new ManagedDirectory(dirname(this.path), this.fault)
+    this.directory = new ManagedDirectory(dirname(this.path), this.fault, !this.readOnly)
     try {
       const file = this.directory.file(basename(this.path))
       if (!existsSync(file) && !this.readOnly) closeSync(openSync(file, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR, 0o600))
@@ -61,6 +51,7 @@ export class SQLiteRoomStore implements DurableRoomStore {
   }
   private available() {
     if (this.uncertain) throw new CommitUncertainError('reopen-required')
+    if (this.snapshotting) throw new PersistenceError('BUSY', 'unchanged')
     this.directory.assert()
     if (!this.db.isOpen) throw new PersistenceError('CLOSED', 'unchanged')
     const stat = this.directory.regular(basename(this.path))
@@ -231,5 +222,30 @@ export class SQLiteRoomStore implements DurableRoomStore {
       this.dirty = Number(result.changes) > 0
     })
   }
-  close() { if (this.db.isOpen) this.db.close(); this.directory.close() }
+  async snapshot<T>(destination: string, copyReferences: () => T): Promise<T> {
+    this.available()
+    if (this.readOnly || this.inTransaction || this.db.isTransaction) throw new PersistenceError('BUSY', 'unchanged')
+    // A second read connection uses SQLite's backup API while this connection
+    // holds the writer lock through copying all referenced files. No command is retried.
+    try { this.db.exec('BEGIN IMMEDIATE') } catch (e) { throw new PersistenceError('BUSY', 'unchanged', e) }
+    this.snapshotting = true
+    let reader: DatabaseSync | undefined
+    try {
+      reader = new DatabaseSync(this.directory.file(basename(this.path)), { readOnly: true, allowExtension: false })
+      this.fault('backup.snapshot')
+      await backup(reader, destination)
+      this.fault('backup.copy')
+      const result = copyReferences()
+      if (result && typeof result === 'object' && 'then' in result) throw new PersistenceError('ASYNC_SNAPSHOT', 'unchanged')
+      return result
+    } finally {
+      try { reader?.close() }
+      finally {
+        try { this.db.exec('ROLLBACK') }
+        catch (e) { this.uncertain = true; throw new PersistenceError('SNAPSHOT_RELEASE', 'unknown', e) }
+        finally { this.snapshotting = false }
+      }
+    }
+  }
+  close() { if (this.snapshotting) throw new PersistenceError('BUSY', 'unchanged'); if (this.db.isOpen) this.db.close(); this.directory.close() }
 }

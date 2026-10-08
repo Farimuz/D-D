@@ -15,13 +15,16 @@ export class FilesystemAssetStore implements AssetStore {
   readonly directory: ManagedDirectory
   readonly storageIdentity: string
   private readonly fault: FaultInjector
-  constructor(path: string, storageIdentity: string, fault: FaultInjector = () => {}) {
+  private readonly readOnly: boolean
+  constructor(path: string, storageIdentity: string, fault: FaultInjector = () => {}, options: { readOnly?: boolean } = {}) {
     if (!ASSET_ID.test(storageIdentity)) throw new PersistenceError('STORAGE_IDENTITY', 'unchanged')
     this.storageIdentity = storageIdentity
-    this.fault = fault; this.directory = new ManagedDirectory(path, fault)
+    this.readOnly = options.readOnly ?? false
+    this.fault = fault; this.directory = new ManagedDirectory(path, fault, !this.readOnly)
     try {
       const marker = this.directory.file(ownerFile)
       if (!existsSync(marker)) {
+        if (this.readOnly) throw new PersistenceError('ASSET_DIRECTORY_OWNER', 'unchanged')
         if (readdirSync(this.directory.path).length) throw new PersistenceError('ASSET_DIRECTORY_NOT_EMPTY', 'unchanged')
         const fd = openSync(marker, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | noFollow, 0o600)
         try { const bytes = Buffer.from(JSON.stringify({ format: 'dnd-assets', version: 1, storageIdentity })); this.writeAll(fd, bytes); fsyncSync(fd) } finally { closeSync(fd) }
@@ -46,6 +49,7 @@ export class FilesystemAssetStore implements AssetStore {
     }
   }
   prepare(id: string, bytes: Uint8Array, type: string): AssetMetadata {
+    if (this.readOnly) throw new PersistenceError('READ_ONLY', 'unchanged')
     this.fault('asset.beforePrepare')
     const temporary = this.filename(id, true), stable = this.filename(id)
     if (!bytes.byteLength || bytes.byteLength > MAX_IMAGE_BYTES || imageType(bytes) !== type) throw new PersistenceError('INVALID_IMAGE', 'unchanged')
@@ -102,6 +106,7 @@ export class FilesystemAssetStore implements AssetStore {
     } finally { closeSync(fd) }
   }
   delete(id: string): undefined {
+    if (this.readOnly) throw new PersistenceError('READ_ONLY', 'unchanged')
     const name = this.filename(id)
     this.fault('asset.delete')
     if (!existsSync(this.directory.file(name))) return
@@ -109,6 +114,7 @@ export class FilesystemAssetStore implements AssetStore {
     this.directory.assert(); unlinkSync(this.directory.file(name)); this.directory.sync()
   }
   recover(references: ReadonlyMap<string, AssetMetadata>): RecoveryReport {
+    if (this.readOnly) throw new PersistenceError('READ_ONLY', 'unchanged')
     this.fault('asset.cleanup')
     // Validate every reference before deleting anything. Uncertainty/corruption
     // stops cleanup, preserving all files for manual recovery.
