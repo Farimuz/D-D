@@ -22,6 +22,10 @@ store.transaction(async () => 42)
 sqlite.transaction(() => Promise.resolve(42))
 // @ts-expect-error A union that might return a Promise is forbidden.
 store.transaction(() => Math.random() ? 42 : Promise.resolve(42))
+// @ts-expect-error Snapshot copying must also remain synchronous.
+sqlite.snapshot('copy.sqlite', async () => 42)
+// @ts-expect-error Ordinary Promise snapshot callbacks are forbidden.
+sqlite.snapshot('copy.sqlite', () => Promise.resolve(42))
 `)
     writeFileSync(join(root, 'tsconfig.json'), JSON.stringify({ compilerOptions: {
       target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler', allowImportingTsExtensions: true,

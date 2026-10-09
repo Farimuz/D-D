@@ -2,8 +2,6 @@ import { backup, DatabaseSync } from 'node:sqlite'
 import { closeSync, constants, existsSync, openSync } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { AsyncLocalStorage } from 'node:async_hooks'
-import { types } from 'node:util'
 import type { RoomState } from '../../../core/room/types.ts'
 import { RoomError } from '../../../core/room/domain.ts'
 import { validRoomState } from '../../../core/room/validation.ts'
@@ -15,13 +13,9 @@ import { ManagedDirectory } from '../filesystem/managedDirectory.ts'
 import { initializeSchema } from './schema.ts'
 import { resourceLimits } from '../resourceLimits.ts'
 import type { ResourceLimits } from '../resourceLimits.ts'
+import { assertSynchronousScope, rejectAsync, runSynchronous } from '../syncWork.ts'
 
 const processNonce = randomUUID()
-// Shared by adapters so delayed work cannot escape through another connection.
-const transactionScope = new AsyncLocalStorage<{ active: boolean }>()
-function assertSynchronousScope() {
-  if (transactionScope.getStore()?.active === false) throw new PersistenceError('ASYNC_TRANSACTION', 'unchanged')
-}
 
 export class SQLiteRoomStore implements DurableRoomStore {
   readonly durable = true as const
@@ -222,7 +216,7 @@ export class SQLiteRoomStore implements DurableRoomStore {
   }
   transaction<T>(work: SyncWork<T>): T {
     this.available()
-    if (types.isAsyncFunction(work)) throw new PersistenceError('ASYNC_TRANSACTION', 'unchanged')
+    rejectAsync(work, 'ASYNC_TRANSACTION')
     if (this.readOnly) throw new PersistenceError('READ_ONLY', 'unchanged')
     if (this.inTransaction) throw new PersistenceError('NESTED_TRANSACTION', 'unchanged')
     this.admitWal()
@@ -233,14 +227,7 @@ export class SQLiteRoomStore implements DurableRoomStore {
     let result!: T, attemptedCommit = false, rolledBack = false
     try {
       const referencedBefore = this.referencedBytes()
-      const scope = { active: true }
-      try { result = transactionScope.run(scope, work) } finally { scope.active = false }
-      if (result && (typeof result === 'object' || typeof result === 'function') && 'then' in result) {
-        // Rejection never cancels a Promise. Its inherited scope has lost adapter
-        // authority; assimilation of custom thenables must inherit that scope too.
-        transactionScope.run(scope, () => { void Promise.resolve(result).catch(() => {}) })
-        throw new PersistenceError('ASYNC_TRANSACTION', 'unchanged')
-      }
+      result = runSynchronous(work, 'ASYNC_TRANSACTION')
       // Validate private/domain associations only once both parts are written.
       for (const roomId of this.changed) { const state = this.load(roomId); if (state) this.validateReference(state, this.loadAccess(roomId)) }
       const referencedAfter = this.referencedBytes()
@@ -292,23 +279,23 @@ export class SQLiteRoomStore implements DurableRoomStore {
       this.dirty = Number(result.changes) > 0
     })
   }
-  async snapshot<T>(destination: string, copyReferences: () => T, beforeCopy?: () => void): Promise<T> {
+  async snapshot<T>(destination: string, copyReferences: SyncWork<T>, beforeCopy?: SyncWork<undefined>): Promise<T> {
     this.available()
+    rejectAsync(copyReferences, 'ASYNC_SNAPSHOT')
+    if (beforeCopy) rejectAsync(beforeCopy, 'ASYNC_SNAPSHOT')
     if (this.readOnly || this.inTransaction || this.db.isTransaction) throw new PersistenceError('BUSY', 'unchanged')
     // A second read connection uses SQLite's backup API while this connection
     // holds the writer lock through copying all referenced files. No command is retried.
     try { this.db.exec('BEGIN IMMEDIATE') } catch (e) { throw new PersistenceError('BUSY', 'unchanged', e) }
     let reader: DatabaseSync | undefined
     try {
-      beforeCopy?.()
+      if (beforeCopy) runSynchronous(beforeCopy, 'ASYNC_SNAPSHOT')
       this.snapshotting = true
       reader = new DatabaseSync(this.directory.file(basename(this.path)), { readOnly: true, allowExtension: false })
       this.fault('backup.snapshot')
       await backup(reader, destination)
       this.fault('backup.copy')
-      const result = copyReferences()
-      if (result && typeof result === 'object' && 'then' in result) throw new PersistenceError('ASYNC_SNAPSHOT', 'unchanged')
-      return result
+      return runSynchronous(copyReferences, 'ASYNC_SNAPSHOT')
     } finally {
       try { reader?.close() }
       finally {

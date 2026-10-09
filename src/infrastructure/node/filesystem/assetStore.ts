@@ -9,6 +9,7 @@ import type { AssetMetadata, AssetStore, FaultInjector, RecoveryReport } from '.
 import { ManagedDirectory } from './managedDirectory.ts'
 import { directoryBytes, resourceLimits } from '../resourceLimits.ts'
 import type { ResourceLimits } from '../resourceLimits.ts'
+import { assertSynchronousScope } from '../syncWork.ts'
 
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const noFollow = constants.O_NOFOLLOW ?? 0
@@ -20,6 +21,7 @@ export class FilesystemAssetStore implements AssetStore {
   private readonly readOnly: boolean
   private readonly limits: Readonly<ResourceLimits>
   constructor(path: string, storageIdentity: string, fault: FaultInjector = () => {}, options: { readOnly?: boolean; limits?: Partial<ResourceLimits> } = {}) {
+    assertSynchronousScope()
     this.limits = resourceLimits(options.limits)
     if (!ASSET_ID.test(storageIdentity)) throw new PersistenceError('STORAGE_IDENTITY', 'unchanged')
     this.storageIdentity = storageIdentity
@@ -53,6 +55,7 @@ export class FilesystemAssetStore implements AssetStore {
     }
   }
   prepare(id: string, bytes: Uint8Array, type: string): AssetMetadata {
+    assertSynchronousScope()
     if (this.readOnly) throw new PersistenceError('READ_ONLY', 'unchanged')
     this.fault('asset.beforePrepare')
     const temporary = this.filename(id, true), stable = this.filename(id)
@@ -88,6 +91,7 @@ export class FilesystemAssetStore implements AssetStore {
     } finally { closeSync(fd) }
   }
   read(metadata: AssetMetadata): Buffer {
+    assertSynchronousScope()
     if (!validAsset(metadata)) throw new PersistenceError('INVALID_ASSET_METADATA', 'unchanged')
     const name = this.filename(metadata.id)
     this.fault('asset.read')
@@ -112,6 +116,7 @@ export class FilesystemAssetStore implements AssetStore {
     } finally { closeSync(fd) }
   }
   delete(id: string): undefined {
+    assertSynchronousScope()
     if (this.readOnly) throw new PersistenceError('READ_ONLY', 'unchanged')
     const name = this.filename(id)
     this.fault('asset.delete')
@@ -120,6 +125,7 @@ export class FilesystemAssetStore implements AssetStore {
     this.directory.assert(); unlinkSync(this.directory.file(name)); this.directory.sync()
   }
   recover(references: ReadonlyMap<string, AssetMetadata>): RecoveryReport {
+    assertSynchronousScope()
     if (this.readOnly) throw new PersistenceError('READ_ONLY', 'unchanged')
     this.fault('asset.cleanup')
     // Validate every reference before deleting anything. Uncertainty/corruption
@@ -156,6 +162,6 @@ export class FilesystemAssetStore implements AssetStore {
     this.directory.sync()
     return report
   }
-  close() { this.directory.close() }
-  usageBytes() { return directoryBytes(this.directory) }
+  close() { assertSynchronousScope(); this.directory.close() }
+  usageBytes() { assertSynchronousScope(); return directoryBytes(this.directory) }
 }
