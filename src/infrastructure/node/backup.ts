@@ -11,6 +11,7 @@ import { PersistenceError } from './persistence.ts'
 import type { AssetMetadata, FaultInjector } from './persistence.ts'
 import { directoryBytes } from './resourceLimits.ts'
 import { restoreIntentName } from './restoreIntent.ts'
+import { canonicalPath } from './filesystem/canonicalPath.ts'
 
 export interface BackupManifest {
   format: 'dnd-backup'; version: 1; schemaVersion: number
@@ -143,7 +144,7 @@ function checkSnapshot(directory: ManagedDirectory, manifest: BackupManifest) {
 
 export async function createBackup(store: SQLiteRoomStore, assetsDirectory: string, backupDirectory: string, fault: FaultInjector = nothing): Promise<string> {
   const parentPath = resolve(backupDirectory), sourceAssetsPath = resolve(assetsDirectory)
-  const inside = relative(sourceAssetsPath, parentPath)
+  const inside = relative(canonicalPath(sourceAssetsPath), canonicalPath(parentPath))
   if (inside === '' || inside !== '..' && !inside.startsWith('..' + sep) && !isAbsolute(inside)) throw new PersistenceError('BACKUP_PATH', 'unchanged')
   const parent = new ManagedDirectory(parentPath, fault)
   let bundle: ManagedDirectory | undefined
@@ -194,7 +195,7 @@ export async function restoreBackup(backupDirectory: string, destination: string
     const manifest = readManifest(source)
     checkSnapshot(source, manifest) // No target is touched until the whole source validates.
     const path = resolve(destination)
-    const nested = relative(source.path, path)
+    const nested = relative(canonicalPath(source.path), canonicalPath(path))
     if (nested === '' || nested !== '..' && !nested.startsWith('..' + sep) && !isAbsolute(nested)) throw new PersistenceError('RESTORE_PATH', 'unchanged')
     if (existsSync(path)) throw new PersistenceError('RESTORE_TARGET_EXISTS', 'unchanged')
     // The parent must already exist; only an exclusively created new target is owned.
@@ -202,7 +203,7 @@ export async function restoreBackup(backupDirectory: string, destination: string
     parent = new ManagedDirectory(parentPath, fault, false)
     // A durable intent predates mkdir: even failure opening the newly created
     // directory cannot make an incomplete restore boot as an empty installation.
-    writeFile(parent, intent, Buffer.from('Incomplete restore; verify destination before removing this intent.\n'))
+    writeFile(parent, intent, Buffer.from(JSON.stringify({ format: 'dnd-restore-intent', version: 1, message: 'Incomplete restore; verify destination before removing this intent.' }) + '\n'))
     parent.assert(); mkdirSync(path, { mode: 0o700 }); parent.sync()
     fault('restore.created')
     target = new ManagedDirectory(path, fault, false)

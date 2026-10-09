@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
 import { lstatSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join } from 'node:path'
+import { canonicalPath } from './filesystem/canonicalPath.ts'
 
 export function restoreIntentName(destination: string): string {
-  const path = resolve(destination)
+  const path = canonicalPath(destination)
   const key = process.platform === 'win32' ? path.toLowerCase() : path
   return 'restore-intent-' + createHash('sha256').update(key).digest('hex') + '.json'
 }

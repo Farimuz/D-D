@@ -1,10 +1,10 @@
 import test from 'node:test'
 import type { TestContext } from 'node:test'
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
-import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync, linkSync, writeFileSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync, linkSync, writeFileSync, lstatSync, renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomUUID, createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
@@ -16,6 +16,7 @@ import { Rooms } from '../../server/rooms.ts'
 import { createRoomState } from '../../src/core/room/domain.ts'
 import { shared } from '../../src/core/room/validation.ts'
 import { emptyBoard } from '../../src/state/model.ts'
+import { storageConfiguration } from '../../server/storageConfig.ts'
 
 const bytes = readFileSync(new URL('../fixtures/grid-16px-margins.png', import.meta.url))
 function root(t: TestContext) {
@@ -63,7 +64,7 @@ test('restore failure immediately after target mkdir cannot start an empty insta
   const directory = root(t), expected = setup(directory), store = new SQLiteRoomStore(join(directory, 'rooms.sqlite'))
   let complete: string
   try { complete = await createBackup(store, join(directory, 'assets'), join(directory, 'backups')) } finally { store.close() }
-  const target = join(directory, 'interrupted')
+  const target = join(directory, 'interrupted-long-target')
   let opens = 0
   await assert.rejects(restoreBackup(complete!, target, point => { if (point === 'directory.open' && ++opens === 3) throw new Error('target-open-denied') }), /target-open-denied/)
   assert.ok(existsSync(target))
@@ -71,6 +72,19 @@ test('restore failure immediately after target mkdir cannot start an empty insta
   try {
     assert.throws(() => { unexpected = createDurableRoomServer({ databasePath: join(target, 'rooms.sqlite'), assetsDirectory: join(target, 'assets') }) }, /RESTORE_INCOMPLETE/)
   } finally { await unexpected?.close() }
+  if (process.platform === 'win32') {
+    const listing = spawnSync('cmd.exe', ['/d', '/c', 'dir', '/x', directory], { encoding: 'utf8', windowsHide: true })
+    assert.equal(listing.status, 0, listing.stderr)
+    const short = /<DIR>\s+(\S+)\s+interrupted-long-target\s*$/mi.exec(listing.stdout)?.[1]
+    if (short) {
+      const alias = join(directory, short)
+      assert.equal(lstatSync(alias, { bigint: true }).ino, lstatSync(target, { bigint: true }).ino)
+      let aliasStartup: ReturnType<typeof createDurableRoomServer> | undefined
+      try {
+        assert.throws(() => { aliasStartup = createDurableRoomServer({ databasePath: join(alias, 'rooms.sqlite'), assetsDirectory: join(alias, 'assets') }) }, /RESTORE_INCOMPLETE/)
+      } finally { await aliasStartup?.close() }
+    } else t.diagnostic('8.3 aliases are disabled; the real short-name case was not exercised on this host.')
+  }
   verify(directory, expected)
 })
 
@@ -86,6 +100,42 @@ test('backup quota scanning tolerates the retained hard-link manifest pair from 
     await assert.rejects(restoreBackup(incomplete, join(directory, 'refused')), /BACKUP_INCOMPLETE/)
   } finally { store.close() }
   verify(directory, expected)
+})
+
+test('Windows short-name aliases cannot place backups physically inside the asset directory', async t => {
+  if (process.platform !== 'win32') { t.skip('Windows 8.3 alias test'); return }
+  const directory = root(t); setup(directory)
+  const assets = join(directory, 'image-asset-directory')
+  renameSync(join(directory, 'assets'), assets)
+  const listing = spawnSync('cmd.exe', ['/d', '/c', 'dir', '/x', directory], { encoding: 'utf8', windowsHide: true })
+  assert.equal(listing.status, 0, listing.stderr)
+  const short = /<DIR>\s+(\S+)\s+image-asset-directory\s*$/mi.exec(listing.stdout)?.[1]
+  if (!short) { t.skip('8.3 aliases are disabled on this volume'); return }
+  const alias = join(directory, short), pool = join(alias, 'copies')
+  assert.equal(lstatSync(alias, { bigint: true }).ino, lstatSync(assets, { bigint: true }).ino)
+  assert.throws(() => storageConfiguration(['--database', join(directory, 'rooms.sqlite'), '--assets-dir', assets, '--backup-dir', pool], {}, directory), /fuera/)
+  const store = new SQLiteRoomStore(join(directory, 'rooms.sqlite'))
+  try { await assert.rejects(createBackup(store, assets, pool), /BACKUP_PATH/) } finally { store.close() }
+  assert.equal(existsSync(pool), false)
+})
+
+test('Windows short-name aliases cannot restore physically inside the immutable backup bundle', async t => {
+  if (process.platform !== 'win32') { t.skip('Windows 8.3 alias test'); return }
+  const directory = root(t); setup(directory)
+  const pool = join(directory, 'backups'), store = new SQLiteRoomStore(join(directory, 'rooms.sqlite'))
+  let complete: string
+  try { complete = await createBackup(store, join(directory, 'assets'), pool) } finally { store.close() }
+  const listing = spawnSync('cmd.exe', ['/d', '/c', 'dir', '/x', pool], { encoding: 'utf8', windowsHide: true })
+  assert.equal(listing.status, 0, listing.stderr)
+  const line = listing.stdout.split(/\r?\n/).find(line => line.trimEnd().endsWith(basename(complete!)))
+  const short = line && /<DIR>\s+(\S+)\s+/i.exec(line)?.[1]
+  if (!short?.includes('~')) { t.skip('8.3 aliases are disabled on this volume'); return }
+  const alias = join(pool, short), target = join(alias, 'restored-inside')
+  assert.equal(lstatSync(alias, { bigint: true }).ino, lstatSync(complete!, { bigint: true }).ino)
+  const before = [hash(join(complete!, 'rooms.sqlite')), hash(join(complete!, 'backup.json'))]
+  await assert.rejects(restoreBackup(complete!, target), /RESTORE_PATH/)
+  assert.equal(existsSync(target), false)
+  assert.deepEqual([hash(join(complete!, 'rooms.sqlite')), hash(join(complete!, 'backup.json'))], before)
 })
 
 for (const point of ['backup.snapshot', 'backup.copy', 'backup.asset', 'backup.publish', 'backup.manifestLinked']) {
