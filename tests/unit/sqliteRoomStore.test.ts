@@ -110,7 +110,8 @@ test('SQLite state and access are atomic; invalid associations and asynchronous 
   const before = store.records()
   assert.throws(() => store.transaction(() => store.save(registerParticipant(store.load('ROOM')!, { id: 'p', name: 'P' }))), /CORRUPT_ACCESS/)
   assert.deepEqual(store.records(), before)
-  assert.throws(() => store.transaction(async () => { store.delete('ROOM') }), /ASYNC_TRANSACTION/)
+  const runtimeTransaction = store.transaction.bind(store) as (work: () => unknown) => unknown
+  assert.throws(() => runtimeTransaction(async () => { store.delete('ROOM') }), /ASYNC_TRANSACTION/)
   assert.deepEqual(store.records(), before)
 })
 

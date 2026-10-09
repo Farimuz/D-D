@@ -2,6 +2,7 @@ import type { RoomStore } from '../../core/room/store.ts'
 import type { RoomState } from '../../core/room/types.ts'
 
 export type FaultInjector = (point: string) => void
+export type SyncWork<T> = () => T & (Extract<T, PromiseLike<unknown>> extends never ? unknown : never)
 export interface PrivateAccess {
   dmHash: string
   identities: Array<{ id: string; identityHash: string }>
@@ -14,7 +15,7 @@ export interface AssetMetadata {
 export interface DurableRoomStore extends RoomStore {
   readonly durable: true
   readonly storageIdentity: string
-  transaction<T>(work: () => T): T
+  transaction<T>(work: SyncWork<T>): T
   loadAccess(id: string): PrivateAccess | null
   saveAccess(id: string, access: PrivateAccess): undefined
   saveAsset(metadata: AssetMetadata): undefined

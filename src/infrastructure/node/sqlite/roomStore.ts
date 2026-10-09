@@ -2,17 +2,24 @@ import { backup, DatabaseSync } from 'node:sqlite'
 import { closeSync, constants, existsSync, openSync } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { types } from 'node:util'
 import type { RoomState } from '../../../core/room/types.ts'
 import { RoomError } from '../../../core/room/domain.ts'
 import { validRoomState } from '../../../core/room/validation.ts'
 import { validAccess } from '../privateAccess.ts'
 import { ASSET_ID, validAsset } from '../assetMetadata.ts'
 import { CommitUncertainError, PersistenceError } from '../persistence.ts'
-import type { AssetMetadata, DurableRoomStore, FaultInjector, PrivateAccess } from '../persistence.ts'
+import type { AssetMetadata, DurableRoomStore, FaultInjector, PrivateAccess, SyncWork } from '../persistence.ts'
 import { ManagedDirectory } from '../filesystem/managedDirectory.ts'
 import { initializeSchema } from './schema.ts'
 
 const processNonce = randomUUID()
+// Shared by adapters so delayed work cannot escape through another connection.
+const transactionScope = new AsyncLocalStorage<{ active: boolean }>()
+function assertSynchronousScope() {
+  if (transactionScope.getStore()?.active === false) throw new PersistenceError('ASYNC_TRANSACTION', 'unchanged')
+}
 
 export class SQLiteRoomStore implements DurableRoomStore {
   readonly durable = true as const
@@ -30,6 +37,7 @@ export class SQLiteRoomStore implements DurableRoomStore {
   private uncertain = false
   private snapshotting = false
   constructor(path: string, options: { fault?: FaultInjector; readOnly?: boolean } = {}) {
+    assertSynchronousScope()
     this.path = resolve(path); this.fault = options.fault ?? (() => {}); this.readOnly = options.readOnly ?? false
     this.directory = new ManagedDirectory(dirname(this.path), this.fault, !this.readOnly)
     try {
@@ -50,6 +58,7 @@ export class SQLiteRoomStore implements DurableRoomStore {
     } catch (e) { this.directory.close(); throw e }
   }
   private available() {
+    assertSynchronousScope()
     if (this.uncertain) throw new CommitUncertainError('reopen-required')
     if (this.snapshotting) throw new PersistenceError('BUSY', 'unchanged')
     this.directory.assert()
@@ -78,6 +87,7 @@ export class SQLiteRoomStore implements DurableRoomStore {
     } catch (e) { if (e instanceof PersistenceError) throw e; throw new PersistenceError('READ', 'unchanged', e) }
   }
   save(state: RoomState): undefined {
+    this.available()
     if (!this.inTransaction) { this.transaction(() => this.write(state, this.loaded.get(state))); return }
     this.write(state, this.loaded.get(state) ?? this.reads.get(state.id))
   }
@@ -95,6 +105,7 @@ export class SQLiteRoomStore implements DurableRoomStore {
     this.reads.set(state.id, version); this.changed.add(state.id); this.dirty = true
   }
   delete(roomId: string): undefined {
+    this.available()
     if (!this.inTransaction) { this.transaction(() => this.delete(roomId)); return }
     this.load(roomId)
     this.fault('sqlite.delete')
@@ -113,6 +124,7 @@ export class SQLiteRoomStore implements DurableRoomStore {
     return access
   }
   saveAccess(roomId: string, access: PrivateAccess): undefined {
+    this.available()
     if (!this.inTransaction) { this.transaction(() => this.saveAccess(roomId, access)); return }
     const state = this.load(roomId)
     if (!state || !validAccess(access, state)) throw new PersistenceError('INVALID_ACCESS', 'unchanged')
@@ -132,6 +144,7 @@ export class SQLiteRoomStore implements DurableRoomStore {
     return meta
   }
   saveAsset(meta: AssetMetadata): undefined {
+    this.available()
     if (!this.inTransaction) { this.transaction(() => this.saveAsset(meta)); return }
     if (!validAsset(meta)) throw new PersistenceError('INVALID_ASSET_METADATA', 'unchanged')
     this.fault('sqlite.writeAsset')
@@ -140,6 +153,7 @@ export class SQLiteRoomStore implements DurableRoomStore {
     this.dirty = true
   }
   pruneAssetMetadata(): undefined {
+    this.available()
     if (!this.inTransaction) { this.transaction(() => this.pruneAssetMetadata()); return }
     const referenced = new Set(this.records().flatMap(({ state }) => state.board.map ? [state.board.map.id] : []))
     for (const row of this.db.prepare('SELECT id FROM assets').all()) if (!referenced.has(String(row.id))) {
@@ -167,8 +181,9 @@ export class SQLiteRoomStore implements DurableRoomStore {
     }
     return result
   }
-  transaction<T>(work: () => T): T {
+  transaction<T>(work: SyncWork<T>): T {
     this.available()
+    if (types.isAsyncFunction(work)) throw new PersistenceError('ASYNC_TRANSACTION', 'unchanged')
     if (this.readOnly) throw new PersistenceError('READ_ONLY', 'unchanged')
     if (this.inTransaction) throw new PersistenceError('NESTED_TRANSACTION', 'unchanged')
     const operationId = randomUUID()
@@ -177,8 +192,14 @@ export class SQLiteRoomStore implements DurableRoomStore {
     this.inTransaction = true; this.dirty = false; this.reads.clear(); this.changed.clear()
     let result!: T, attemptedCommit = false
     try {
-      result = work()
-      if (result && typeof result === 'object' && 'then' in result) throw new PersistenceError('ASYNC_TRANSACTION', 'unchanged')
+      const scope = { active: true }
+      try { result = transactionScope.run(scope, work) } finally { scope.active = false }
+      if (result && (typeof result === 'object' || typeof result === 'function') && 'then' in result) {
+        // Rejection never cancels a Promise. Its inherited scope has lost adapter
+        // authority; assimilation of custom thenables must inherit that scope too.
+        transactionScope.run(scope, () => { void Promise.resolve(result).catch(() => {}) })
+        throw new PersistenceError('ASYNC_TRANSACTION', 'unchanged')
+      }
       // Validate private/domain associations only once both parts are written.
       for (const roomId of this.changed) { const state = this.load(roomId); if (state) this.validateReference(state, this.loadAccess(roomId)) }
       if (this.dirty) this.db.prepare('INSERT INTO commit_receipts(operation_id, committed_at) VALUES (?, ?)').run(operationId, Date.now())
@@ -247,5 +268,5 @@ export class SQLiteRoomStore implements DurableRoomStore {
       }
     }
   }
-  close() { if (this.snapshotting) throw new PersistenceError('BUSY', 'unchanged'); if (this.db.isOpen) this.db.close(); this.directory.close() }
+  close() { assertSynchronousScope(); if (this.snapshotting) throw new PersistenceError('BUSY', 'unchanged'); if (this.db.isOpen) this.db.close(); this.directory.close() }
 }

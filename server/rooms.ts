@@ -7,7 +7,7 @@ import type { Actor, RoomState, SharedBoard } from '../src/core/room/types.ts'
 import type { RoomStore } from '../src/core/room/store.ts'
 import { MemoryRoomStore } from '../src/infrastructure/memory/roomStore.ts'
 import { isDurable, PersistenceError } from '../src/infrastructure/node/persistence.ts'
-import type { AssetMetadata, AssetStore, DurableRoomStore, PrivateAccess, RecoveryReport } from '../src/infrastructure/node/persistence.ts'
+import type { AssetMetadata, AssetStore, DurableRoomStore, PrivateAccess, RecoveryReport, SyncWork } from '../src/infrastructure/node/persistence.ts'
 import type { Action, Join, Snapshot } from '../src/online/protocol.ts'
 export { RoomError } from '../src/core/room/domain.ts'
 export type { Actor } from '../src/core/room/types.ts'
@@ -31,7 +31,7 @@ export class Rooms {
     this.store = store; this.durableStore = isDurable(store) ? store : null; this.assets = assets ?? null
     if (assets && (!this.durableStore || assets.storageIdentity !== this.durableStore.storageIdentity)) throw new PersistenceError('ASSET_DIRECTORY_OWNER', 'unchanged')
   }
-  private coordinate<T>(work: () => T): T { return this.durableStore ? this.durableStore.transaction(work) : work() }
+  private coordinate<T>(work: SyncWork<T>): T { return this.durableStore ? this.durableStore.transaction(work) : work() }
   private privateAccess(room: Room): PrivateAccess | null {
     if (!this.durableStore) return null
     const access = this.durableStore.loadAccess(room.id)
