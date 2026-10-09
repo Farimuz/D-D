@@ -76,6 +76,7 @@ export class FilesystemAssetStore implements AssetStore {
       // Hard-link publication is atomic and refuses an existing target; rename
       // could overwrite an unrelated file after an ID collision.
       linkSync(this.directory.file(temporary), this.directory.file(stable))
+      this.fault('asset.published')
       this.directory.assert()
       const published = lstatSync(this.directory.file(stable), { bigint: true })
       if (!published.isFile() || published.isSymbolicLink() || published.dev !== opened.dev || published.ino !== opened.ino || published.nlink !== 2n) throw new PersistenceError('PATH_CHANGED', 'unchanged')

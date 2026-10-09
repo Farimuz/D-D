@@ -90,17 +90,17 @@ test('audit: delayed work cannot escape through another SQLite connection or clo
   const { store, id, transaction } = fixture(t)
   const other = new SQLiteRoomStore(store.path)
   try {
-  let finish!: (errors: unknown[]) => void
-  const late = new Promise<unknown[]>(resolve => { finish = resolve })
-  transaction(() => {
-    setImmediate(() => {
-      const errors = [() => other.delete(id), () => other.close(), () => new SQLiteRoomStore(store.path)].map(work => {
-        try { work(); return null } catch (error) { return error }
+    let finish!: (errors: unknown[]) => void
+    const late = new Promise<unknown[]>(resolve => { finish = resolve })
+    transaction(() => {
+      setImmediate(() => {
+        const errors = [() => other.delete(id), () => other.close(), () => new SQLiteRoomStore(store.path)].map(work => {
+          try { work(); return null } catch (error) { return error }
+        })
+        finish(errors)
       })
-      finish(errors)
     })
-  })
-  for (const error of await late) assert.match(String(error), /ASYNC_TRANSACTION/)
-  assert.ok(other.load(id))
+    for (const error of await late) assert.match(String(error), /ASYNC_TRANSACTION/)
+    assert.ok(other.load(id))
   } finally { other.close() }
 })

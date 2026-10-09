@@ -71,3 +71,15 @@ test('durable cleanup preserves maps referenced by every room and explicit map d
   rooms.delete(secondRoom.id); assert.equal(store.loadAsset(second.id), null)
   assert.deepEqual(readdirSync(assetPath), ['assets-owner.json'])
 })
+
+test('two rooms referencing the same asset keep its bytes and metadata until the last reference is explicitly removed', t => {
+  const { rooms, room, store, assetPath } = fixture(t), first = upload(rooms, room), second = rooms.get(rooms.create().roomId)
+  store.transaction(() => { const state = store.load(second.id)!; state.board.map = { ...first }; store.save(state) })
+  const length = store.usage().referencedAssetBytes
+  assert.equal(length, bytes.length)
+  rooms.apply(room, dm, { type: 'map.delete' })
+  assert.deepEqual(second.image!.bytes, bytes); assert.ok(store.loadAsset(first.id))
+  rooms.recoverAssets(); assert.ok(readdirSync(assetPath).includes(first.id + '.asset'))
+  rooms.delete(second.id)
+  assert.equal(store.loadAsset(first.id), null); assert.deepEqual(readdirSync(assetPath), ['assets-owner.json'])
+})

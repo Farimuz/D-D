@@ -92,7 +92,7 @@ test('separate Node processes recover the complete DM + two-player room after gr
   await last.stop()
 })
 
-for (const point of ['asset.beforePrepare', 'asset.partialWrite', 'asset.prepared', 'sqlite.commit', 'sqlite.afterCommit', 'asset.cleanup']) {
+for (const point of ['asset.beforePrepare', 'asset.partialWrite', 'asset.sync', 'asset.published', 'asset.prepared', 'sqlite.commit', 'sqlite.afterCommit', 'asset.cleanup', 'asset.delete']) {
   test(`abrupt Node death at ${point} recovers a coherent reference and the last valid image`, { timeout: 20000 }, async t => {
     const data = directory(t), first = await data.start(), access = await create(first)
     const res = await upload(first, access); assert.equal(res.status, 200)
@@ -102,7 +102,7 @@ for (const point of ['asset.beforePrepare', 'asset.partialWrite', 'asset.prepare
     await first.crashPoint(point); await first.stop(true)
     assert.equal(await pending, 0)
     const restarted = await data.start(), dm = await new OnlinePeer(restarted.socketUrl).join({ type: 'join', ...access, role: 'dm' })
-    const committed = point === 'sqlite.afterCommit' || point === 'asset.cleanup'
+    const committed = ['sqlite.afterCommit', 'asset.cleanup', 'asset.delete'].includes(point)
     assert.equal(dm.latest!.revision, committed ? 2 : 1)
     if (committed) assert.notEqual(dm.latest!.board.map!.id, old.id)
     else assert.deepEqual(dm.latest!.board.map, old)
