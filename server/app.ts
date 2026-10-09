@@ -136,6 +136,7 @@ export function createRoomServer(options: { dist?: string; heartbeatMs?: number;
     } catch (error) {
       if (res.destroyed || res.headersSent) return
       if (error instanceof CommitUncertainError) json(res, 503, { code: 'COMMIT_UNCERTAIN', message: 'No se pudo confirmar el resultado. Comprueba la sala después de reiniciar el servidor antes de repetir la operación.' })
+      else if (error instanceof PersistenceError && error.code.startsWith('RESOURCE_LIMIT_')) json(res, 503, { code: error.code, message: 'El almacenamiento alcanzó su límite. La operación no se confirmó; conserva la partida y solicita espacio al administrador.' })
       else if (error instanceof HttpError) json(res, error.status, { message: error.message })
       else if (error instanceof RoomError) json(res, error.code === 'ROOM_NOT_FOUND' ? 404 : 409, { message: error.message, code: error.code })
       else json(res, 500, { message: 'No se pudo completar la operación.' })

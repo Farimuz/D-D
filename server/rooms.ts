@@ -166,6 +166,7 @@ export class Rooms {
       const next = this.coordinate(() => {
         const access = this.privateAccess(room)
         const state = replaceMap(this.read(room), actor, map)
+        this.durableStore!.checkAssetCapacity(room.id, image.bytes.length)
         const metadata = this.assets!.prepare(image.id, image.bytes, image.type)
         this.durableStore!.saveAsset(metadata)
         this.saveActive(state, access)

@@ -21,6 +21,7 @@ export interface DurableRoomStore extends RoomStore {
   saveAsset(metadata: AssetMetadata): undefined
   loadAsset(id: string): AssetMetadata | null
   pruneAssetMetadata(): undefined
+  checkAssetCapacity(roomId: string, byteLength: number): void
   records(): Array<{ state: RoomState; access: PrivateAccess | null; storageVersion: number }>
 }
 export interface RecoveryReport { removed: string[]; retained: string[]; unknown: string[] }

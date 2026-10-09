@@ -7,6 +7,8 @@ import { ASSET_ID, validAsset } from '../assetMetadata.ts'
 import { PersistenceError } from '../persistence.ts'
 import type { AssetMetadata, AssetStore, FaultInjector, RecoveryReport } from '../persistence.ts'
 import { ManagedDirectory } from './managedDirectory.ts'
+import { directoryBytes, resourceLimits } from '../resourceLimits.ts'
+import type { ResourceLimits } from '../resourceLimits.ts'
 
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const noFollow = constants.O_NOFOLLOW ?? 0
@@ -16,7 +18,9 @@ export class FilesystemAssetStore implements AssetStore {
   readonly storageIdentity: string
   private readonly fault: FaultInjector
   private readonly readOnly: boolean
-  constructor(path: string, storageIdentity: string, fault: FaultInjector = () => {}, options: { readOnly?: boolean } = {}) {
+  private readonly limits: Readonly<ResourceLimits>
+  constructor(path: string, storageIdentity: string, fault: FaultInjector = () => {}, options: { readOnly?: boolean; limits?: Partial<ResourceLimits> } = {}) {
+    this.limits = resourceLimits(options.limits)
     if (!ASSET_ID.test(storageIdentity)) throw new PersistenceError('STORAGE_IDENTITY', 'unchanged')
     this.storageIdentity = storageIdentity
     this.readOnly = options.readOnly ?? false
@@ -57,6 +61,7 @@ export class FilesystemAssetStore implements AssetStore {
     if (!dimensions.width || !dimensions.height || dimensions.width * dimensions.height > MAX_IMAGE_PIXELS) throw new PersistenceError('INVALID_IMAGE', 'unchanged')
     const metadata = { id, type, byteLength: bytes.byteLength, sha256: digest(bytes), width: dimensions.width, height: dimensions.height }
     if (!validAsset(metadata)) throw new PersistenceError('INVALID_IMAGE', 'unchanged')
+    if (this.usageBytes() + bytes.byteLength > this.limits.maxAssetStorageBytes) throw new PersistenceError('RESOURCE_LIMIT_ASSET_STORAGE', 'unchanged')
     this.fault('asset.open'); this.directory.assert()
     const fd = openSync(this.directory.file(temporary), constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | noFollow, 0o600)
     try {
@@ -151,4 +156,5 @@ export class FilesystemAssetStore implements AssetStore {
     return report
   }
   close() { this.directory.close() }
+  usageBytes() { return directoryBytes(this.directory) }
 }

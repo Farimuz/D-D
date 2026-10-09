@@ -6,17 +6,19 @@ import { CommitUncertainError, PersistenceError } from '../src/infrastructure/no
 import type { FaultInjector } from '../src/infrastructure/node/persistence.ts'
 import { createRoomServer } from './app.ts'
 import { Rooms } from './rooms.ts'
+import type { ResourceLimits } from '../src/infrastructure/node/resourceLimits.ts'
 
 export function createDurableRoomServer(options: {
   databasePath: string; assetsDirectory: string; fault?: FaultInjector
+  limits?: Partial<ResourceLimits>
   dist?: string; heartbeatMs?: number; joinTimeoutMs?: number
 }) {
   if (existsSync(join(dirname(options.databasePath), 'restore-in-progress'))) throw new PersistenceError('RESTORE_INCOMPLETE', 'unchanged')
-  const store = new SQLiteRoomStore(options.databasePath, { fault: options.fault })
+  const store = new SQLiteRoomStore(options.databasePath, { fault: options.fault, limits: options.limits })
   let assets: FilesystemAssetStore | undefined, lease: string | undefined
   try {
     lease = store.claimRuntime()
-    assets = new FilesystemAssetStore(options.assetsDirectory, store.storageIdentity, options.fault)
+    assets = new FilesystemAssetStore(options.assetsDirectory, store.storageIdentity, options.fault, { limits: options.limits })
     const recovery = new Rooms(store, assets).recoverAssets()
     const app = createRoomServer({ roomStore: store, assetStore: assets, dist: options.dist, heartbeatMs: options.heartbeatMs, joinTimeoutMs: options.joinTimeoutMs })
     let closing: Promise<void> | undefined

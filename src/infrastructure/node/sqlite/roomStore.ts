@@ -13,6 +13,8 @@ import { CommitUncertainError, PersistenceError } from '../persistence.ts'
 import type { AssetMetadata, DurableRoomStore, FaultInjector, PrivateAccess, SyncWork } from '../persistence.ts'
 import { ManagedDirectory } from '../filesystem/managedDirectory.ts'
 import { initializeSchema } from './schema.ts'
+import { resourceLimits } from '../resourceLimits.ts'
+import type { ResourceLimits } from '../resourceLimits.ts'
 
 const processNonce = randomUUID()
 // Shared by adapters so delayed work cannot escape through another connection.
@@ -24,6 +26,7 @@ function assertSynchronousScope() {
 export class SQLiteRoomStore implements DurableRoomStore {
   readonly durable = true as const
   readonly path: string
+  readonly limits: Readonly<ResourceLimits>
   private readonly directory: ManagedDirectory
   private readonly fileIdentity: { dev: bigint; ino: bigint }
   private readonly db: DatabaseSync
@@ -36,8 +39,9 @@ export class SQLiteRoomStore implements DurableRoomStore {
   private dirty = false
   private uncertain = false
   private snapshotting = false
-  constructor(path: string, options: { fault?: FaultInjector; readOnly?: boolean } = {}) {
+  constructor(path: string, options: { fault?: FaultInjector; readOnly?: boolean; limits?: Partial<ResourceLimits> } = {}) {
     assertSynchronousScope()
+    this.limits = resourceLimits(options.limits)
     this.path = resolve(path); this.fault = options.fault ?? (() => {}); this.readOnly = options.readOnly ?? false
     this.directory = new ManagedDirectory(dirname(this.path), this.fault, !this.readOnly)
     try {
@@ -52,7 +56,10 @@ export class SQLiteRoomStore implements DurableRoomStore {
       try {
         initializeSchema(this.db, this.readOnly, this.fault)
         void this.storageIdentity
-        if (!this.readOnly) this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=250;')
+        if (!this.readOnly) {
+          const pageSize = Number(this.db.prepare('PRAGMA page_size').get()!.page_size)
+          this.db.exec(`PRAGMA max_page_count=${Math.max(1, Math.floor(this.limits.maxDatabaseBytes / pageSize))}; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=250; PRAGMA wal_autocheckpoint=128;`)
+        }
         this.records()
       } catch (e) { this.db.close(); throw e }
     } catch (e) { this.directory.close(); throw e }
@@ -97,6 +104,7 @@ export class SQLiteRoomStore implements DurableRoomStore {
     if (current) this.load(state.id) // An invalid existing record must never be silently repaired by saving.
     if (current && (expected === undefined || Number(current.storage_version) !== expected)) throw new PersistenceError('CONFLICT', 'unchanged')
     if (!current && expected !== undefined) throw new PersistenceError('CONFLICT', 'unchanged')
+    if (!current && Number(this.db.prepare('SELECT COUNT(*) AS n FROM rooms').get()!.n) >= this.limits.maxRooms) throw new PersistenceError('RESOURCE_LIMIT_ROOMS', 'unchanged')
     this.fault('sqlite.writeState')
     const version = current ? Number(current.storage_version) + 1 : 1
     if (!Number.isSafeInteger(version)) throw new PersistenceError('STORAGE_VERSION_LIMIT', 'unchanged')
@@ -166,6 +174,37 @@ export class SQLiteRoomStore implements DurableRoomStore {
     const meta = this.loadAsset(state.board.map.id), map = state.board.map
     if (!meta || !(meta.width === map.width && meta.height === map.height || meta.width === map.height && meta.height === map.width)) throw new PersistenceError('CORRUPT_ASSET_REFERENCE', 'unchanged')
   }
+  private referencedBytes(excludingRoom?: string): number {
+    if (this.db.prepare('SELECT 1 FROM rooms WHERE NOT json_valid(state_json) LIMIT 1').get()) throw new PersistenceError('CORRUPT_STATE', 'unchanged')
+    const row = this.db.prepare(`SELECT COALESCE(SUM(byte_length), 0) AS bytes FROM assets WHERE id IN
+      (SELECT json_extract(state_json, '$.board.map.id') FROM rooms WHERE ? IS NULL OR id <> ?)`)
+      .get(excludingRoom ?? null, excludingRoom ?? null)!
+    return Number(row.bytes)
+  }
+  checkAssetCapacity(roomId: string, byteLength: number): void {
+    this.available()
+    if (!this.inTransaction) throw new PersistenceError('TRANSACTION_REQUIRED', 'unchanged')
+    if (!Number.isSafeInteger(byteLength) || byteLength < 1) throw new PersistenceError('INVALID_ASSET_METADATA', 'unchanged')
+    const before = this.referencedBytes(), after = this.referencedBytes(roomId) + byteLength
+    if (after > this.limits.maxReferencedAssetBytes && after > before) throw new PersistenceError('RESOURCE_LIMIT_REFERENCED_ASSETS', 'unchanged')
+  }
+  private fileBytes(suffix: string): number {
+    try { return Number(this.directory.regular(basename(this.path) + suffix).size) }
+    catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return 0; throw e }
+  }
+  private admitWal() {
+    if (this.fileBytes('-wal') <= this.limits.maxWalBytes) return
+    this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+    if (this.fileBytes('-wal') > this.limits.maxWalBytes) throw new PersistenceError('RESOURCE_LIMIT_WAL', 'unchanged')
+  }
+  usage() {
+    this.available()
+    return { rooms: Number(this.db.prepare('SELECT COUNT(*) AS n FROM rooms').get()!.n),
+      referencedAssetBytes: this.referencedBytes(), assetMetadata: Number(this.db.prepare('SELECT COUNT(*) AS n FROM assets').get()!.n),
+      commitReceipts: Number(this.db.prepare('SELECT COUNT(*) AS n FROM commit_receipts').get()!.n),
+      databaseBytes: this.fileBytes(''), allocatedDatabaseBytes: Number(this.db.prepare('PRAGMA page_count').get()!.page_count) * Number(this.db.prepare('PRAGMA page_size').get()!.page_size),
+      walBytes: this.fileBytes('-wal'), limits: this.limits }
+  }
   records(): ReturnType<DurableRoomStore['records']> {
     this.available()
     if (!this.inTransaction && !this.db.isTransaction) {
@@ -186,12 +225,14 @@ export class SQLiteRoomStore implements DurableRoomStore {
     if (types.isAsyncFunction(work)) throw new PersistenceError('ASYNC_TRANSACTION', 'unchanged')
     if (this.readOnly) throw new PersistenceError('READ_ONLY', 'unchanged')
     if (this.inTransaction) throw new PersistenceError('NESTED_TRANSACTION', 'unchanged')
+    this.admitWal()
     const operationId = randomUUID()
     try { this.fault('sqlite.begin'); this.db.exec('BEGIN IMMEDIATE') }
     catch (e) { throw new PersistenceError((e as { errcode?: number }).errcode === 5 ? 'BUSY' : 'BEGIN', 'unchanged', e) }
     this.inTransaction = true; this.dirty = false; this.reads.clear(); this.changed.clear()
-    let result!: T, attemptedCommit = false
+    let result!: T, attemptedCommit = false, rolledBack = false
     try {
+      const referencedBefore = this.referencedBytes()
       const scope = { active: true }
       try { result = transactionScope.run(scope, work) } finally { scope.active = false }
       if (result && (typeof result === 'object' || typeof result === 'function') && 'then' in result) {
@@ -202,17 +243,25 @@ export class SQLiteRoomStore implements DurableRoomStore {
       }
       // Validate private/domain associations only once both parts are written.
       for (const roomId of this.changed) { const state = this.load(roomId); if (state) this.validateReference(state, this.loadAccess(roomId)) }
-      if (this.dirty) this.db.prepare('INSERT INTO commit_receipts(operation_id, committed_at) VALUES (?, ?)').run(operationId, Date.now())
+      const referencedAfter = this.referencedBytes()
+      if (referencedAfter > this.limits.maxReferencedAssetBytes && referencedAfter > referencedBefore) throw new PersistenceError('RESOURCE_LIMIT_REFERENCED_ASSETS', 'unchanged')
+      if (this.dirty) {
+        this.db.prepare('INSERT INTO commit_receipts(operation_id, committed_at) VALUES (?, ?)').run(operationId, Date.now())
+        this.db.prepare('DELETE FROM commit_receipts WHERE rowid NOT IN (SELECT rowid FROM commit_receipts ORDER BY rowid DESC LIMIT ?)').run(this.limits.maxCommitReceipts)
+      }
       this.fault('sqlite.commit'); attemptedCommit = true; this.db.exec('COMMIT'); this.fault('sqlite.afterCommit')
       return result
     } catch (e) {
       try {
-        if (this.db.isTransaction) { this.fault('sqlite.rollback'); this.db.exec('ROLLBACK') }
+        if (this.db.isTransaction) { this.fault('sqlite.rollback'); this.db.exec('ROLLBACK'); rolledBack = true }
         if (this.db.isTransaction) throw new Error('Rollback not confirmed')
         this.fault('sqlite.reconcile')
         const receipt = this.db.prepare('SELECT operation_id FROM commit_receipts WHERE operation_id = ?').get(operationId)
         if (receipt) return result // Confirmed commit, including an exception after COMMIT.
         if (attemptedCommit && !this.dirty) return result // Read-only transaction has no durable effects.
+        // Another connection may have pruned the receipt after our COMMIT.
+        // Absence without a confirmed rollback cannot prove rejection.
+        if (attemptedCommit && this.dirty && !rolledBack) throw new Error('Commit receipt unavailable')
       } catch (reconcile) { this.uncertain = true; throw new CommitUncertainError(operationId, reconcile) }
       if (e instanceof RoomError) throw e
       if (e instanceof PersistenceError) throw this.dirty ? new PersistenceError(e.code, 'rolled-back', e) : e
@@ -243,15 +292,16 @@ export class SQLiteRoomStore implements DurableRoomStore {
       this.dirty = Number(result.changes) > 0
     })
   }
-  async snapshot<T>(destination: string, copyReferences: () => T): Promise<T> {
+  async snapshot<T>(destination: string, copyReferences: () => T, beforeCopy?: () => void): Promise<T> {
     this.available()
     if (this.readOnly || this.inTransaction || this.db.isTransaction) throw new PersistenceError('BUSY', 'unchanged')
     // A second read connection uses SQLite's backup API while this connection
     // holds the writer lock through copying all referenced files. No command is retried.
     try { this.db.exec('BEGIN IMMEDIATE') } catch (e) { throw new PersistenceError('BUSY', 'unchanged', e) }
-    this.snapshotting = true
     let reader: DatabaseSync | undefined
     try {
+      beforeCopy?.()
+      this.snapshotting = true
       reader = new DatabaseSync(this.directory.file(basename(this.path)), { readOnly: true, allowExtension: false })
       this.fault('backup.snapshot')
       await backup(reader, destination)

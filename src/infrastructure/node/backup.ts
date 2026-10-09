@@ -9,6 +9,7 @@ import { ManagedDirectory } from './filesystem/managedDirectory.ts'
 import { ASSET_ID, validAsset } from './assetMetadata.ts'
 import { PersistenceError } from './persistence.ts'
 import type { AssetMetadata, FaultInjector } from './persistence.ts'
+import { directoryBytes } from './resourceLimits.ts'
 
 export interface BackupManifest {
   format: 'dnd-backup'; version: 1; schemaVersion: number
@@ -147,19 +148,15 @@ export async function createBackup(store: SQLiteRoomStore, assetsDirectory: stri
   let bundle: ManagedDirectory | undefined
   try {
     const path = join(parent.path, new Date().toISOString().replace(/[:.]/g, '-') + '-' + randomUUID())
-    parent.assert(); mkdirSync(path, { mode: 0o700 }); parent.sync()
-    bundle = new ManagedDirectory(path, fault, false)
-    writeFile(bundle, 'backup-in-progress', Buffer.from('Incomplete backup; do not restore.\n'))
-    writeFile(bundle, 'rooms.sqlite', Buffer.alloc(0))
-    const target = bundle
-    await store.snapshot(target.file('rooms.sqlite'), () => {
+    await store.snapshot(join(path, 'rooms.sqlite'), () => {
+      const target = bundle!
       standaloneSnapshot(target)
       const snapshot = new SQLiteRoomStore(join(target.path, 'rooms.sqlite'), { readOnly: true })
       let source: FilesystemAssetStore | undefined, copies: FilesystemAssetStore | undefined
       try {
         const refs = references(snapshot)
         source = new FilesystemAssetStore(sourceAssetsPath, snapshot.storageIdentity, fault, { readOnly: true })
-        copies = new FilesystemAssetStore(join(target.path, 'assets'), snapshot.storageIdentity, fault)
+        copies = new FilesystemAssetStore(join(target.path, 'assets'), snapshot.storageIdentity, fault, { limits: store.limits })
         copyAssets(source, copies, refs.assets, fault, 'backup')
         const manifest: BackupManifest = { format: 'dnd-backup', version: 1, schemaVersion: SCHEMA_VERSION,
           storageIdentity: snapshot.storageIdentity, createdAt: new Date().toISOString(), databaseSha256: fileHash(target, 'rooms.sqlite'), ...refs }
@@ -168,7 +165,18 @@ export async function createBackup(store: SQLiteRoomStore, assetsDirectory: stri
         if (bytes.length > 16 * 1024 * 1024) throw new PersistenceError('BACKUP_MANIFEST_LIMIT', 'unchanged')
         writeFile(target, 'backup.partial.json', bytes)
       } finally { copies?.close(); source?.close(); snapshot.close() }
+    }, () => {
+      // The source writer lock serializes admission with its mutations/backups.
+      // Keep failed bundles in the budget; no automatic backup deletion.
+      const usage = store.usage(), refs = references(store)
+      const reserve = usage.allocatedDatabaseBytes + usage.referencedAssetBytes + 8192 + refs.assets.length * 1024
+      if (directoryBytes(parent, true) + reserve > store.limits.maxBackupBytes) throw new PersistenceError('RESOURCE_LIMIT_BACKUPS', 'unchanged')
+      parent.assert(); mkdirSync(path, { mode: 0o700 }); parent.sync()
+      bundle = new ManagedDirectory(path, fault, false)
+      writeFile(bundle, 'backup-in-progress', Buffer.from('Incomplete backup; do not restore.\n'))
+      writeFile(bundle, 'rooms.sqlite', Buffer.alloc(0))
     })
+    if (!bundle) throw new PersistenceError('BACKUP_INCOMPLETE', 'unchanged')
     fault('backup.publish')
     // Atomic no-clobber publication of the manifest. A flag remains until complete.
     linkSync(bundle.file('backup.partial.json'), bundle.file('backup.json'))
