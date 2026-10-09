@@ -73,6 +73,24 @@ test('durable HTTP room creation reports an uncertain result as 503 without clai
 const mapBytes = readFileSync(new URL('../fixtures/grid-16px-margins.png', import.meta.url))
 const layout = { x: -80, y: 90, scale: 2, width: 857, height: 1081 }
 
+test('invalid and stale map GETs reject before reading asset bytes; a current GET still verifies bytes', async t => {
+  let reads = 0
+  const { app, url } = await fixture(t, p => { if (p === 'asset.read') reads++ }, true)
+  const access = app.rooms.create(), endpoint = url + '/api/rooms/' + access.roomId + '/map'
+  const headers = { Authorization: 'Bearer ' + access.credential, 'X-Map-Layout': JSON.stringify(layout) }
+  const upload = async () => (await (await fetch(endpoint, { method: 'PUT', headers, body: mapBytes })).json()).map
+  const old = await upload(), current = await upload()
+  reads = 0
+  for (const id of [old.id, '00000000-0000-4000-8000-000000000000']) {
+    assert.equal((await fetch(endpoint + '/' + id)).status, 404)
+    assert.equal(reads, 0)
+  }
+  const response = await fetch(endpoint + '/' + current.id)
+  assert.equal(response.status, 200)
+  assert.equal(reads, 1)
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), mapBytes)
+})
+
 test('durable binary HTTP maps confirm files and projections; a failed replacement keeps the old served bytes', async t => {
   let armed = false
   const { app, store, url, socketUrl } = await fixture(t, p => { if (armed && p === 'asset.publish') { armed = false; throw new Error('Publish denied') } }, true)

@@ -84,6 +84,7 @@ export function createRoomServer(options: { dist?: string; heartbeatMs?: number;
       if (mapPath) {
         const room = rooms.get(mapPath[1])
         if (req.method === 'GET' && mapPath[2]) {
+          if (room.board.map?.id !== mapPath[2]) throw new HttpError(404, 'El mapa ya no está disponible.')
           const image = room.image
           if (!image || image.id !== mapPath[2]) throw new HttpError(404, 'El mapa ya no está disponible.')
           res.writeHead(200, { 'Content-Type': image.type, 'Content-Length': image.bytes.length, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })

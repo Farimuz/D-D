@@ -56,7 +56,8 @@ export class Rooms {
         if (!map) return null
         const metadata = owner.durableStore.loadAsset(map.id)
         if (!metadata) throw new PersistenceError('CORRUPT_ASSET_REFERENCE', 'unchanged')
-        return { id: map.id, bytes: Buffer.from(owner.assets.read(metadata)), type: metadata.type }
+        const bytes = owner.assets.read(metadata)
+        return { id: map.id, bytes: Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes), type: metadata.type }
       }, set image(value) { memoryImage = value },
     }
     this.rooms.set(id, room)
