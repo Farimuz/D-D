@@ -10,6 +10,7 @@ import { ASSET_ID, validAsset } from './assetMetadata.ts'
 import { PersistenceError } from './persistence.ts'
 import type { AssetMetadata, FaultInjector } from './persistence.ts'
 import { directoryBytes } from './resourceLimits.ts'
+import { restoreIntentName } from './restoreIntent.ts'
 
 export interface BackupManifest {
   format: 'dnd-backup'; version: 1; schemaVersion: number
@@ -180,6 +181,7 @@ export async function createBackup(store: SQLiteRoomStore, assetsDirectory: stri
     fault('backup.publish')
     // Atomic no-clobber publication of the manifest. A flag remains until complete.
     linkSync(bundle.file('backup.partial.json'), bundle.file('backup.json'))
+    fault('backup.manifestLinked')
     unlinkSync(bundle.file('backup.partial.json')); unlinkSync(bundle.file('backup-in-progress')); bundle.sync()
     return path
   } finally { bundle?.close(); parent.close() }
@@ -187,7 +189,7 @@ export async function createBackup(store: SQLiteRoomStore, assetsDirectory: stri
 
 export async function restoreBackup(backupDirectory: string, destination: string, fault: FaultInjector = nothing): Promise<string> {
   const source = new ManagedDirectory(backupDirectory, fault, false)
-  let target: ManagedDirectory | undefined
+  let target: ManagedDirectory | undefined, parent: ManagedDirectory | undefined
   try {
     const manifest = readManifest(source)
     checkSnapshot(source, manifest) // No target is touched until the whole source validates.
@@ -196,8 +198,13 @@ export async function restoreBackup(backupDirectory: string, destination: string
     if (nested === '' || nested !== '..' && !nested.startsWith('..' + sep) && !isAbsolute(nested)) throw new PersistenceError('RESTORE_PATH', 'unchanged')
     if (existsSync(path)) throw new PersistenceError('RESTORE_TARGET_EXISTS', 'unchanged')
     // The parent must already exist; only an exclusively created new target is owned.
-    const parentPath = resolve(path, '..'), parent = new ManagedDirectory(parentPath, fault, false)
-    try { parent.assert(); mkdirSync(path, { mode: 0o700 }); parent.sync() } finally { parent.close() }
+    const parentPath = resolve(path, '..'), intent = restoreIntentName(path)
+    parent = new ManagedDirectory(parentPath, fault, false)
+    // A durable intent predates mkdir: even failure opening the newly created
+    // directory cannot make an incomplete restore boot as an empty installation.
+    writeFile(parent, intent, Buffer.from('Incomplete restore; verify destination before removing this intent.\n'))
+    parent.assert(); mkdirSync(path, { mode: 0o700 }); parent.sync()
+    fault('restore.created')
     target = new ManagedDirectory(path, fault, false)
     writeFile(target, 'restore-in-progress', Buffer.from('Incomplete restore; server startup is blocked.\n'))
     writeFile(target, 'rooms.sqlite', Buffer.alloc(0))
@@ -212,6 +219,7 @@ export async function restoreBackup(backupDirectory: string, destination: string
     // Recheck source too: a backup is an immutable operator-owned artifact.
     checkSnapshot(source, manifest)
     fault('restore.publish'); unlinkSync(target.file('restore-in-progress')); target.sync()
+    parent.regular(intent); unlinkSync(parent.file(intent)); parent.sync()
     return path
-  } finally { target?.close(); source.close() }
+  } finally { target?.close(); parent?.close(); source.close() }
 }

@@ -1,5 +1,4 @@
-import { existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname } from 'node:path'
 import { SQLiteRoomStore } from '../src/infrastructure/node/sqlite/roomStore.ts'
 import { FilesystemAssetStore } from '../src/infrastructure/node/filesystem/assetStore.ts'
 import { CommitUncertainError, PersistenceError } from '../src/infrastructure/node/persistence.ts'
@@ -7,13 +6,14 @@ import type { FaultInjector } from '../src/infrastructure/node/persistence.ts'
 import { createRoomServer } from './app.ts'
 import { Rooms } from './rooms.ts'
 import type { ResourceLimits } from '../src/infrastructure/node/resourceLimits.ts'
+import { restoreIncomplete } from '../src/infrastructure/node/restoreIntent.ts'
 
 export function createDurableRoomServer(options: {
   databasePath: string; assetsDirectory: string; fault?: FaultInjector
   limits?: Partial<ResourceLimits>
   dist?: string; heartbeatMs?: number; joinTimeoutMs?: number
 }) {
-  if (existsSync(join(dirname(options.databasePath), 'restore-in-progress'))) throw new PersistenceError('RESTORE_INCOMPLETE', 'unchanged')
+  if (restoreIncomplete(dirname(options.databasePath))) throw new PersistenceError('RESTORE_INCOMPLETE', 'unchanged')
   const store = new SQLiteRoomStore(options.databasePath, { fault: options.fault, limits: options.limits })
   let assets: FilesystemAssetStore | undefined, lease: string | undefined
   try {

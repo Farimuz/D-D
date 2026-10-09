@@ -2,7 +2,7 @@ import test from 'node:test'
 import type { TestContext } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync, linkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -59,7 +59,36 @@ function verify(directory: string, expected: ReturnType<typeof setup>) {
 }
 const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex')
 
-for (const point of ['backup.snapshot', 'backup.copy', 'backup.asset', 'backup.publish']) {
+test('restore failure immediately after target mkdir cannot start an empty installation as a completed restore', async t => {
+  const directory = root(t), expected = setup(directory), store = new SQLiteRoomStore(join(directory, 'rooms.sqlite'))
+  let complete: string
+  try { complete = await createBackup(store, join(directory, 'assets'), join(directory, 'backups')) } finally { store.close() }
+  const target = join(directory, 'interrupted')
+  let opens = 0
+  await assert.rejects(restoreBackup(complete!, target, point => { if (point === 'directory.open' && ++opens === 3) throw new Error('target-open-denied') }), /target-open-denied/)
+  assert.ok(existsSync(target))
+  let unexpected: ReturnType<typeof createDurableRoomServer> | undefined
+  try {
+    assert.throws(() => { unexpected = createDurableRoomServer({ databasePath: join(target, 'rooms.sqlite'), assetsDirectory: join(target, 'assets') }) }, /RESTORE_INCOMPLETE/)
+  } finally { await unexpected?.close() }
+  verify(directory, expected)
+})
+
+test('backup quota scanning tolerates the retained hard-link manifest pair from interrupted publication', async t => {
+  const directory = root(t), expected = setup(directory), store = new SQLiteRoomStore(join(directory, 'rooms.sqlite'))
+  try {
+    const pool = join(directory, 'backups'), incomplete = await createBackup(store, join(directory, 'assets'), pool)
+    writeFileSync(join(incomplete, 'backup-in-progress'), 'Interrupted publication\n')
+    linkSync(join(incomplete, 'backup.json'), join(incomplete, 'backup.partial.json'))
+    const next = await createBackup(store, join(directory, 'assets'), pool)
+    assert.ok(next); assert.ok(existsSync(join(incomplete, 'backup-in-progress')))
+    assert.ok(existsSync(join(incomplete, 'backup.partial.json')))
+    await assert.rejects(restoreBackup(incomplete, join(directory, 'refused')), /BACKUP_INCOMPLETE/)
+  } finally { store.close() }
+  verify(directory, expected)
+})
+
+for (const point of ['backup.snapshot', 'backup.copy', 'backup.asset', 'backup.publish', 'backup.manifestLinked']) {
   test(`actual Node termination at ${point} preserves source and refuses the incomplete bundle`, { timeout: 20000 }, async t => {
     const directory = root(t), expected = setup(directory)
     await killAt('backup', directory, point)
@@ -73,7 +102,7 @@ for (const point of ['backup.snapshot', 'backup.copy', 'backup.asset', 'backup.p
     await restoreBackup(complete!, join(directory, 'restored')); verify(join(directory, 'restored'), expected)
   })
 }
-for (const point of ['restore.snapshot', 'restore.asset', 'restore.verify', 'restore.publish']) {
+for (const point of ['restore.created', 'restore.snapshot', 'restore.asset', 'restore.verify', 'restore.publish']) {
   test(`actual Node termination at ${point} blocks startup and preserves an independently restorable backup`, { timeout: 20000 }, async t => {
     const directory = root(t), expected = setup(directory), store = new SQLiteRoomStore(join(directory, 'rooms.sqlite'))
     let complete: string
@@ -81,7 +110,7 @@ for (const point of ['restore.snapshot', 'restore.asset', 'restore.verify', 'res
     const files = ['backup.json', 'rooms.sqlite', 'assets/' + expected.map.id + '.asset'], before = files.map(file => hash(join(complete!, file)))
     await killAt('restore', directory, point, complete!)
     const target = join(directory, 'interrupted')
-    assert.equal(existsSync(join(target, 'restore-in-progress')), true)
+    if (point !== 'restore.created') assert.equal(existsSync(join(target, 'restore-in-progress')), true)
     assert.throws(() => createDurableRoomServer({ databasePath: join(target, 'rooms.sqlite'), assetsDirectory: join(target, 'assets') }), /RESTORE_INCOMPLETE/)
     await assert.rejects(restoreBackup(complete!, target), /RESTORE_TARGET_EXISTS/)
     assert.deepEqual(files.map(file => hash(join(complete!, file))), before)

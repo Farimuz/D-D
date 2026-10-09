@@ -32,7 +32,12 @@ export function directoryBytes(directory: ManagedDirectory, recursive = false, d
     if (recursive && stat.isDirectory() && !stat.isSymbolicLink()) {
       const child = new ManagedDirectory(directory.file(name), () => {}, false)
       try { bytes += directoryBytes(child, true, depth + 1) } finally { child.close() }
-    } else bytes += Number(directory.regular(name).size)
+    } else {
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new PersistenceError('UNSAFE_FILE', 'unchanged')
+      // Accounting never reads or removes a hard link. Count every name
+      // conservatively, including a manifest pair left during publication.
+      bytes += stat.size
+    }
     if (!Number.isSafeInteger(bytes)) throw new PersistenceError('RESOURCE_SCAN_LIMIT', 'unchanged')
   }
   directory.assert()
