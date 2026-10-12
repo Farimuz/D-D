@@ -2,13 +2,15 @@ import { test as base, expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { fileURLToPath } from 'node:url'
 import type { BoardState, Point } from '../../src/state/model'
+import { navigationDiagnostics, markNavigation } from '../fixtures/navigation-diagnostics'
 
 const test = base.extend<{ cleanConsole: void }>({
-  cleanConsole: [async ({ page }, use) => {
+  cleanConsole: [async ({ page }, use, info) => {
     const errors: string[] = []
     page.on('pageerror', error => errors.push(error.message))
     page.on('console', message => { if (['error', 'warning'].includes(message.type())) errors.push(message.text()) })
-    await use()
+    const finishDiagnostics = navigationDiagnostics(page, info)
+    try { await use() } finally { await finishDiagnostics() }
     expect(errors).toEqual([])
   }, { auto: true }],
 })
@@ -99,8 +101,10 @@ test('alignment mouse flow previews 16px cell, applies scale and offset together
   expect(after.map).toEqual({ ...before.map, scale: proposedScale, x: expectedX, y: expectedY })
   expect(after.tokens).toEqual(before.tokens)
   await expect(page.getByRole('region', { name: 'Ficha seleccionada' })).toContainText('Exploradora')
-  await page.reload(); expect(await saved(page)).toEqual(after)
+  markNavigation(page, 'reload-start')
+  await page.reload(); markNavigation(page, 'reload-return'); expect(await saved(page)).toEqual(after)
   await expect(page.locator('.map-image')).toBeVisible()
+  markNavigation(page, 'restored-app-checked')
 })
 
 test('alignment retry and cancel restore exact state; normal tools are inaccessible and Escape retains token selection', async ({ page }) => {
