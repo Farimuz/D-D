@@ -4,7 +4,7 @@ Proyecto para crear una herramienta propia que facilite organizar y jugar partid
 
 La idea es construir una experiencia sencilla de usar tanto en PC como en teléfono, especialmente pensada para reducir el trabajo del Dungeon Master.
 
-**v0.0.5 — Núcleo portable y persistencia Node (fases A + B)** conserva la mesa local y las salas multijugador de v0.0.4. El DM comparte un enlace o código y los jugadores mueven sus fichas asignadas. SQLite conserva salas y accesos privados; el filesystem conserva los mapas. Reiniciar el servidor con las mismas rutas recupera esos datos. La fase A está aprobada; la fase B está implementada y pendiente de auditoría independiente. No hay cuentas. El paquete conserva la versión 0.0.4 hasta una publicación de versión posterior.
+**v0.0.5 — Núcleo portable y persistencia Node (fases A + B + B.1)** conserva la mesa local y las salas multijugador de v0.0.4. El DM comparte un enlace o código y los jugadores mueven sus fichas asignadas. SQLite conserva salas y accesos privados; el filesystem conserva los mapas. Reiniciar el servidor con las mismas rutas recupera esos datos. La [auditoría final](docs/architecture/v0.0.5-final-audit.md) recoge las correcciones, regresión actual y evaluación para PR; las auditorías A/B/B.1 conservan sus resultados históricos. No hay cuentas. El paquete conserva la versión 0.0.4 hasta una publicación de versión posterior.
 
 ## Ejecutar
 
@@ -72,7 +72,7 @@ npm run storage -- restore --backup ".dnd-backups/<copia>" --target ".dnd-data/r
 npm start -- --data-dir ".dnd-data/restore-01"
 ```
 
-Sustituye `<copia>` por la carpeta impresa. El destino de restauración debe ser nuevo y su padre debe existir. Consulta [configuración, recuperación y límites](docs/architecture/phase-b-persistence.md) antes de operar sobre datos durables.
+Sustituye `<copia>` por la carpeta impresa. El destino de restauración debe ser nuevo y su padre debe existir. Cada restauración recibe una identidad técnica nueva; conserva partida y accesos, pero debe usar su propio directorio de mapas. Comprueba los overrides de rutas del entorno. Consulta [configuración, recuperación y límites](docs/architecture/phase-b-persistence.md) antes de operar sobre datos durables.
 
 ## Pruebas
 

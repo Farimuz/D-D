@@ -4,7 +4,7 @@ Este documento describe el diseño vivo derivado de la decisión [0003 — Núcl
 
 No es una especificación inmutable. Debe actualizarse cuando la implementación real cambie.
 
-## Estado vigente — v0.0.5, fase B
+## Estado vigente — v0.0.5, fases B/B.1 y revisión final
 
 La fase B añade `SQLiteRoomStore`, `FilesystemAssetStore` y coordinación transaccional de estado/accesos/metadatos. El servidor Node arranca durable por defecto, recupera salas y mapas después de reinicios reales y ofrece backup consistente y restauración a una ubicación nueva. El core y el protocolo siguen independientes de Node, SQLite, filesystem y variables de entorno; `MemoryRoomStore` y el modo temporal permanecen disponibles.
 
@@ -12,7 +12,7 @@ La fase B añade `SQLiteRoomStore`, `FilesystemAssetStore` y coordinación trans
 
 La pasada correctiva de B añade cuotas configurables y diagnóstico del adaptador, revocación de continuaciones internas asíncronas y protección de restauraciones incompletas antes de crear destino. Identidad y contención reconocen aliases físicos Windows 8.3 sin ocultar symlinks/junctions a la validación. Ninguno de estos mecanismos entra al core.
 
-Véase [Persistencia de fase B](phase-b-persistence.md) para operación y [Auditoría destructiva de B](phase-b-audit.md) para defectos, correcciones, regresión y pendientes. El veredicto es `FASE_B_NEEDS_CORRECTION`: permanecen inestabilidad de integración paralela en Node 22.18.0 y un timeout E2E de recarga en iPhone emulado. Cloudflare y despliegues continúan fuera del alcance.
+Véase [Persistencia de fase B](phase-b-persistence.md) para operación y [Auditoría destructiva de B](phase-b-audit.md) para el registro histórico `FASE_B_NEEDS_CORRECTION`. [El seguimiento B.1](phase-b1-stability.md) obtuvo `FASE_B_APPROVED` mediante controles externos y regresión completa, conservando incertidumbres causales: suites secuenciales y dos procesos de archivos de integración solo en Windows/Node 22.18.0. La [auditoría final](v0.0.5-final-audit.md) evalúa el diff integral y documenta dos correcciones nuevas de infraestructura: recorrido de cuotas compatible con anclas Linux e identidad técnica nueva para cada restauración, evitando que reclame los mapas del original. IDs, partida, accesos, protocolo y esquema permanecen iguales. Cloudflare y despliegues continúan fuera del alcance.
 
 Desde **Preparación de v0.0.5 — fase A**, el texto siguiente se conserva íntegramente como registro histórico de la extracción y del diseño aprobado. Sus referencias a capacidades pendientes describen el estado de fase A; la implementación vigente de B está documentada arriba y en el documento enlazado.
 
