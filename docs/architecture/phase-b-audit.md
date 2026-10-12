@@ -197,3 +197,7 @@ La auditoría confirmó y corrigió crecimiento no acotado, ejecución tardía e
 La estabilidad predeterminada de integración en Node 22.18.0 sigue sin causa demostrada; los resultados seriales/dos workers no la resuelven. La regresión final de navegador tuvo además un timeout de recarga y no se presenta como totalmente verde. No se concede aprobación automática ni autorización para Oracle. Los cambios y este informe se publican únicamente en la rama solicitada, tras revisar resultados y diff. La comprobación final de SHA remoto/workspace y el paquete de evidencia están en el informe externo entregado al usuario.
 
 FASE_B_NEEDS_CORRECTION
+
+## Seguimiento fechado — 2026-10-12
+
+[La investigación correctiva B.1](phase-b1-stability.md) documenta la separación externa de la inestabilidad Node22/Windows, una mitigación específica del harness que conserva concurrencia de clientes, los controles de navegación iPhone y la regresión completa posterior de 484/484. Incluye resultados negativos, limitaciones causales, un error de adquisición de trazas y revisión independiente con probe propio. Su veredicto de seguimiento es FASE_B_APPROVED en las condiciones documentadas. El veredicto histórico FASE_B_NEEDS_CORRECTION y los resultados de esta auditoría B permanecen intactos; no se declara retroactivamente que sus pruebas fallidas pasaron ni se autoriza merge/despliegue.
