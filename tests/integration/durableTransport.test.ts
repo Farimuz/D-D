@@ -73,6 +73,39 @@ test('durable HTTP room creation reports an uncertain result as 503 without clai
 const mapBytes = readFileSync(new URL('../fixtures/grid-16px-margins.png', import.meta.url))
 const layout = { x: -80, y: 90, scale: 2, width: 857, height: 1081 }
 
+test('one durable server preserves concurrent HTTP, player joins and eight commands with private access excluded', { timeout: 20000 }, async t => {
+  const { app, store, url, socketUrl } = await fixture(t, () => {}, true)
+  await Promise.all(Array.from({ length: 8 }, async () => {
+    const response = await fetch(url + '/api/health')
+    assert.equal(response.status, 200)
+    await response.arrayBuffer()
+  }))
+  const access = app.rooms.create(), dm = await new OnlinePeer(socketUrl).join({ type: 'join', ...access, role: 'dm' })
+  const players = await Promise.all(Array.from({ length: 8 }, (_, index) => new OnlinePeer(socketUrl).join({
+    type: 'join', roomId: access.roomId, role: 'player', identity: (index + 1).toString(16).padStart(64, '0'), name: 'Concurrent-' + index,
+  })))
+  const results = await Promise.all(Array.from({ length: 8 }, (_, index) => dm.action({ type: 'token.create', name: 'Concurrent-' + index, x: index, y: 0 })))
+  assert.ok(results.every(result => result.ok))
+  await Promise.all(players.map(player => player.wait(value => value.type === 'state' && value.revision === 8)))
+  const persisted = store.load(access.roomId)!
+  assert.equal(persisted.revision, 8)
+  assert.equal(persisted.board.tokens.length, 8)
+  assert.equal(new Set(persisted.board.tokens.map(token => token.id)).size, 8)
+  const response = await fetch(url + '/api/rooms/' + access.roomId + '/map', {
+    method: 'PUT', headers: { Authorization: 'Bearer ' + access.credential, 'X-Map-Layout': JSON.stringify(layout) }, body: mapBytes,
+  })
+  assert.equal(response.status, 200)
+  const map = (await response.json()).map
+  await Promise.all(players.map(player => player.wait(value => value.type === 'state' && value.revision === 9)))
+  await Promise.all(Array.from({ length: 8 }, async () => {
+    const image = await fetch(url + '/api/rooms/' + access.roomId + '/map/' + map.id)
+    assert.equal(image.status, 200)
+    assert.deepEqual(Buffer.from(await image.arrayBuffer()), mapBytes)
+  }))
+  assert.equal(store.load(access.roomId)!.revision, 9)
+  assert.ok(players.every(player => !player.frames.join('').includes(access.credential)))
+})
+
 test('invalid and stale map GETs reject before reading asset bytes; a current GET still verifies bytes', async t => {
   let reads = 0
   const { app, url } = await fixture(t, p => { if (p === 'asset.read') reads++ }, true)
