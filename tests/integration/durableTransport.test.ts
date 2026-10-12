@@ -82,10 +82,14 @@ test('invalid and stale map GETs reject before reading asset bytes; a current GE
   const old = await upload(), current = await upload()
   reads = 0
   for (const id of [old.id, '00000000-0000-4000-8000-000000000000']) {
-    assert.equal((await fetch(endpoint + '/' + id)).status, 404)
+    const response = await fetch(endpoint + '/' + id)
+    assert.equal(response.status, 404)
+    await response.arrayBuffer()
     assert.equal(reads, 0)
   }
-  const response = await fetch(endpoint + '/' + current.id)
+  const response = await fetch(endpoint + '/' + current.id).catch((error: Error) => {
+    throw new Error(`Current map GET failed: ${error.message}; cause: ${String(error.cause)}`, { cause: error })
+  })
   assert.equal(response.status, 200)
   assert.equal(reads, 1)
   assert.deepEqual(Buffer.from(await response.arrayBuffer()), mapBytes)

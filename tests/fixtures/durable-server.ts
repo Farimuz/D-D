@@ -1,5 +1,10 @@
-import { createDurableRoomServer } from '../../server/durable.ts'
 import { writeSync } from 'node:fs'
+
+const started = performance.now()
+const stage = (name: string) => writeSync(1, `DND_STARTUP:${name}:${(performance.now() - started).toFixed(1)}ms\n`)
+stage('before-import')
+const { createDurableRoomServer } = await import('../../server/durable.ts')
+stage('imports-ready')
 
 // A distinct process for persistence tests. Crash gates block synchronously only
 // after an explicit test IPC message arms them; production has no crash controls.
@@ -9,7 +14,8 @@ const app = createDurableRoomServer({ databasePath: process.argv[2], assetsDirec
   writeSync(1, `DND_CRASH_POINT:${point}\n`)
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0)
 } })
-app.http.listen(0, '127.0.0.1', () => process.send?.({ type: 'ready', port: (app.http.address() as { port: number }).port, pid: process.pid }))
+stage('storage-ready')
+app.http.listen(0, '127.0.0.1', () => { stage('listening'); process.send?.({ type: 'ready', port: (app.http.address() as { port: number }).port, pid: process.pid }) })
 process.on('message', message => {
   if (!message || typeof message !== 'object' || !('type' in message)) return
   if (message.type === 'arm' && 'point' in message && typeof message.point === 'string') { crashAt = message.point; process.send?.({ type: 'armed' }) }

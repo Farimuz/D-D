@@ -16,7 +16,7 @@ export async function startDurableProcess(databasePath: string, assetsDirectory:
   child.stderr!.on('data', bytes => { errors += String(bytes) })
   function message(type: string): Promise<Record<string, unknown>> {
     return new Promise((accept, reject) => {
-      const timer = setTimeout(() => { cleanup(); child.kill('SIGKILL'); reject(new Error(`Child ${type} timeout: ${errors.slice(-1500)}`)) }, 8000)
+      const timer = setTimeout(() => { cleanup(); child.kill('SIGKILL'); reject(new Error(`Child ${type} timeout: ${errors.slice(-1500)} ${output.slice(-1000)}`)) }, 8000)
       const receive = (v: unknown) => { if (v && typeof v === 'object' && 'type' in v && v.type === type) { cleanup(); accept(v as Record<string, unknown>) } }
       const exit = () => { cleanup(); reject(new Error(`Child exited before ${type}: ${errors.slice(-1500)}`)) }
       function cleanup() { clearTimeout(timer); child.off('message', receive); child.off('exit', exit) }
