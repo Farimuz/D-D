@@ -67,7 +67,7 @@ for (const point of ['backup.snapshot', 'backup.copy', 'backup.asset', 'backup.p
     assert.ok(await createBackup(f.store, f.assetPath, f.backupPath))
   })
 }
-for (const point of ['restore.snapshot', 'restore.asset', 'restore.verify', 'restore.publish']) {
+for (const point of ['restore.snapshot', 'restore.identity', 'restore.asset', 'restore.verify', 'restore.publish']) {
   test(`${point} permission failure leaves a protected incomplete target and never mutates the backup`, async t => {
     const f = fixture(t), backup = await createBackup(f.store, f.assetPath, f.backupPath), target = join(f.root, 'restored')
     const original = readFileSync(join(backup, 'rooms.sqlite')), manifest = readFileSync(join(backup, 'backup.json'))
@@ -114,4 +114,30 @@ test('read-only adapters never create missing paths or markers and reject writes
   assert.deepEqual(readdirSync(missing), [])
   const reader = new FilesystemAssetStore(f.assetPath, f.store.storageIdentity, undefined, { readOnly: true })
   try { assert.throws(() => reader.delete(f.image.id), /READ_ONLY/); assert.throws(() => reader.recover(new Map()), /READ_ONLY/); assert.throws(() => reader.prepare(randomUUID(), bytes, 'image/png'), /READ_ONLY/) } finally { reader.close() }
+})
+
+test('restored installations retain exact game/access data but cannot share the source asset directory', async t => {
+  const f = fixture(t), before = f.store.records(), backup = await createBackup(f.store, f.assetPath, f.backupPath)
+  const backupBytes = readFileSync(join(backup, 'rooms.sqlite')), manifestBytes = readFileSync(join(backup, 'backup.json'))
+  const first = await restoreBackup(backup, join(f.root, 'first')), second = await restoreBackup(backup, join(f.root, 'second'))
+  const firstStore = new SQLiteRoomStore(join(first, 'rooms.sqlite'), { readOnly: true }), secondStore = new SQLiteRoomStore(join(second, 'rooms.sqlite'), { readOnly: true })
+  try {
+    assert.notEqual(firstStore.storageIdentity, f.store.storageIdentity)
+    assert.notEqual(secondStore.storageIdentity, firstStore.storageIdentity)
+    assert.deepEqual(firstStore.records(), before); assert.deepEqual(secondStore.records(), before)
+    const ownAssets = new FilesystemAssetStore(join(first, 'assets'), firstStore.storageIdentity, undefined, { readOnly: true })
+    try { assert.deepEqual(ownAssets.read(firstStore.loadAsset(f.image.id)!), bytes) } finally { ownAssets.close() }
+  } finally { firstStore.close(); secondStore.close() }
+  let wrong: ReturnType<typeof createDurableRoomServer> | undefined
+  try {
+    assert.throws(() => { wrong = createDurableRoomServer({ databasePath: join(first, 'rooms.sqlite'), assetsDirectory: f.assetPath }) }, /ASSET_DIRECTORY_OWNER/)
+  } finally { await wrong?.close() }
+  const restored = createDurableRoomServer({ databasePath: join(first, 'rooms.sqlite'), assetsDirectory: join(first, 'assets') })
+  try {
+    assert.deepEqual(restored.rooms.get(f.room.id).image!.bytes, bytes)
+    restored.rooms.apply(restored.rooms.get(f.room.id), dm, { type: 'map.delete' })
+    assert.deepEqual(f.store.records(), before); assert.deepEqual(f.room.image!.bytes, bytes)
+  } finally { await restored.close() }
+  assert.deepEqual(readFileSync(join(backup, 'rooms.sqlite')), backupBytes)
+  assert.deepEqual(readFileSync(join(backup, 'backup.json')), manifestBytes)
 })

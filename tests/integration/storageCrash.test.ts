@@ -152,7 +152,7 @@ for (const point of ['backup.snapshot', 'backup.copy', 'backup.asset', 'backup.p
     await restoreBackup(complete!, join(directory, 'restored')); verify(join(directory, 'restored'), expected)
   })
 }
-for (const point of ['restore.created', 'restore.snapshot', 'restore.asset', 'restore.verify', 'restore.publish']) {
+for (const point of ['restore.created', 'restore.snapshot', 'restore.identity', 'restore.asset', 'restore.verify', 'restore.publish']) {
   test(`actual Node termination at ${point} blocks startup and preserves an independently restorable backup`, { timeout: 20000 }, async t => {
     const directory = root(t), expected = setup(directory), store = new SQLiteRoomStore(join(directory, 'rooms.sqlite'))
     let complete: string

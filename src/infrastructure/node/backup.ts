@@ -99,6 +99,20 @@ function standaloneSnapshot(directory: ManagedDirectory) {
   } finally { db.close() }
   syncDatabase(directory)
 }
+function restoredIdentity(directory: ManagedDirectory, expected: string): string {
+  const identity = randomUUID()
+  directory.regular('rooms.sqlite')
+  const db = new DatabaseSync(directory.file('rooms.sqlite'), { allowExtension: false })
+  try {
+    db.exec('BEGIN IMMEDIATE')
+    const result = db.prepare('UPDATE storage_identity SET value=? WHERE id=1 AND value=?').run(identity, expected)
+    if (Number(result.changes) !== 1) throw new PersistenceError('BACKUP_IDENTITY', 'unchanged')
+    db.exec('COMMIT')
+  } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); throw error }
+  finally { db.close() }
+  syncDatabase(directory)
+  return identity
+}
 function manifestValue(value: unknown): value is BackupManifest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const v = value as Record<string, unknown>
@@ -210,13 +224,20 @@ export async function restoreBackup(backupDirectory: string, destination: string
     writeFile(target, 'restore-in-progress', Buffer.from('Incomplete restore; server startup is blocked.\n'))
     writeFile(target, 'rooms.sqlite', Buffer.alloc(0))
     fault('restore.snapshot'); copySnapshot(source, target)
+    if (fileHash(target, 'rooms.sqlite') !== manifest.databaseSha256) throw new PersistenceError('BACKUP_CHECKSUM', 'unchanged')
+    // A restore is a new installation. Reusing the backup's binding would let
+    // its distinct database claim the original files and clean up its maps.
+    // The intent/flag remain until the new DB/assets pair is verified together.
+    const storageIdentity = restoredIdentity(target, manifest.storageIdentity)
+    fault('restore.identity')
     const original = new FilesystemAssetStore(join(source.path, 'assets'), manifest.storageIdentity, fault, { readOnly: true })
     let copies: FilesystemAssetStore | undefined
     try {
-      copies = new FilesystemAssetStore(join(target.path, 'assets'), manifest.storageIdentity, fault)
+      copies = new FilesystemAssetStore(join(target.path, 'assets'), storageIdentity, fault)
       copyAssets(original, copies, manifest.assets, fault, 'restore')
     } finally { copies?.close(); original.close() }
-    fault('restore.verify'); checkSnapshot(target, manifest)
+    const restoredManifest = { ...manifest, storageIdentity, databaseSha256: fileHash(target, 'rooms.sqlite') }
+    fault('restore.verify'); checkSnapshot(target, restoredManifest)
     // Recheck source too: a backup is an immutable operator-owned artifact.
     checkSnapshot(source, manifest)
     fault('restore.publish'); unlinkSync(target.file('restore-in-progress')); target.sync()
