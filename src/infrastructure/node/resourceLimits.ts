@@ -1,4 +1,5 @@
 import { readdirSync, lstatSync } from 'node:fs'
+import { join } from 'node:path'
 import { ManagedDirectory } from './filesystem/managedDirectory.ts'
 import { PersistenceError } from './persistence.ts'
 
@@ -30,7 +31,9 @@ export function directoryBytes(directory: ManagedDirectory, recursive = false, d
   for (const name of readdirSync(directory.path)) {
     const stat = lstatSync(directory.file(name))
     if (recursive && stat.isDirectory() && !stat.isSymbolicLink()) {
-      const child = new ManagedDirectory(directory.file(name), () => {}, false)
+      // file() may be a Linux fd anchor containing symlinks. A new directory
+      // must pin the checked physical ancestors, not treat that anchor as input.
+      const child = new ManagedDirectory(join(directory.path, name), () => {}, false)
       try { bytes += directoryBytes(child, true, depth + 1) } finally { child.close() }
     } else {
       if (!stat.isFile() || stat.isSymbolicLink()) throw new PersistenceError('UNSAFE_FILE', 'unchanged')

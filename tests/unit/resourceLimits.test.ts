@@ -1,7 +1,7 @@
 import test from 'node:test'
 import type { TestContext } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -11,6 +11,8 @@ import { FilesystemAssetStore } from '../../src/infrastructure/node/filesystem/a
 import { Rooms } from '../../server/rooms.ts'
 import { createBackup } from '../../src/infrastructure/node/backup.ts'
 import type { ResourceLimits } from '../../src/infrastructure/node/resourceLimits.ts'
+import { directoryBytes } from '../../src/infrastructure/node/resourceLimits.ts'
+import { ManagedDirectory } from '../../src/infrastructure/node/filesystem/managedDirectory.ts'
 
 const bytes = readFileSync(new URL('../fixtures/grid-16px-margins.png', import.meta.url))
 const dm = { role: 'dm', id: null } as const
@@ -133,4 +135,17 @@ test('backup admission counts retained bundles and rejects before creating anoth
   await assert.rejects(createBackup(store, assetsPath, join(root, 'backups')), /RESOURCE_LIMIT_BACKUPS/)
   assert.deepEqual(readdirSync(join(root, 'backups')), [])
   assert.equal(store.records().length, 1)
+})
+
+test('recursive quota scanning opens checked child directories independently of descriptor-style file paths', t => {
+  const root = mkdtempSync(join(tmpdir(), 'dnd-directory-quota-')), pool = join(root, 'pool'), anchor = join(root, 'anchor')
+  mkdirSync(pool); mkdirSync(join(pool, 'bundle')); writeFileSync(join(pool, 'bundle', 'snapshot.bin'), '1234567')
+  symlinkSync(pool, anchor, process.platform === 'win32' ? 'junction' : 'dir')
+  const directory = new ManagedDirectory(pool, () => {}, false)
+  t.after(() => { directory.close(); rmSync(root, { recursive: true, force: true }) })
+  // Linux file() returns an fd anchor, whereas path retains checked ancestors.
+  // This facade exercises that distinction on Windows without claiming Linux execution.
+  const checkedFile = directory.file.bind(directory)
+  directory.file = name => { checkedFile(name); return join(anchor, name) }
+  assert.equal(directoryBytes(directory, true), 7)
 })
