@@ -10,7 +10,9 @@ La fase B añade `SQLiteRoomStore`, `FilesystemAssetStore` y coordinación trans
 
 `BEGIN IMMEDIATE` y una versión de almacenamiento distinta de la revisión protegen escritores independientes. Las proyecciones se emiten desde el estado confirmado. Un resultado de commit incierto pone el almacén en cuarentena; los comandos no se reproducen automáticamente. La publicación ordenada de archivos y la recuperación conservadora resuelven interrupciones entre SQLite y filesystem sin prometer una transacción conjunta. Treinta minutos de inactividad durable liberan RAM y conservan el registro.
 
-Véase [Persistencia de fase B](phase-b-persistence.md) para esquema, accesos, migraciones, seguridad de rutas, crash recovery, configuración, backup/restauración, evidencia y límites. `FASE_B_IMPLEMENTED` es estado de implementación; la auditoría independiente está pendiente. Cloudflare y despliegues continúan fuera del alcance.
+La pasada correctiva de B añade cuotas configurables y diagnóstico del adaptador, revocación de continuaciones internas asíncronas y protección de restauraciones incompletas antes de crear destino. Identidad y contención reconocen aliases físicos Windows 8.3 sin ocultar symlinks/junctions a la validación. Ninguno de estos mecanismos entra al core.
+
+Véase [Persistencia de fase B](phase-b-persistence.md) para operación y [Auditoría destructiva de B](phase-b-audit.md) para defectos, correcciones, regresión y pendientes. El veredicto es `FASE_B_NEEDS_CORRECTION`: permanecen inestabilidad de integración paralela en Node 22.18.0 y un timeout E2E de recarga en iPhone emulado. Cloudflare y despliegues continúan fuera del alcance.
 
 Desde **Preparación de v0.0.5 — fase A**, el texto siguiente se conserva íntegramente como registro histórico de la extracción y del diseño aprobado. Sus referencias a capacidades pendientes describen el estado de fase A; la implementación vigente de B está documentada arriba y en el documento enlazado.
 

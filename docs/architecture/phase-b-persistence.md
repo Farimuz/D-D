@@ -1,6 +1,6 @@
 # D&D v0.0.5-B — Persistencia Node
 
-Estado: **FASE_B_IMPLEMENTED**, pendiente de auditoría independiente. Implementación sobre `feat/v0.0.5-portable-persistence`, conservando la Fase A aprobada en `c172c7f`. No constituye aprobación de auditoría ni despliegue. El paquete mantiene 0.0.4; no se creó tag de release.
+Estado: **FASE_B_NEEDS_CORRECTION** después de la [auditoría destructiva de B](phase-b-audit.md). Los defectos demostrados de almacenamiento y recuperación fueron corregidos; siguen pendientes la estabilidad de integración paralela en Node 22.18.0 y un timeout E2E de recarga en iPhone emulado. Implementación sobre `feat/v0.0.5-portable-persistence`, conservando la Fase A aprobada en `c172c7f`. No constituye aprobación de despliegue. El paquete mantiene 0.0.4; no se creó tag de release.
 
 ## Arquitectura y driver
 
@@ -33,7 +33,7 @@ No hay migraciones destructivas en B. Cualquier migración destructiva futura re
 
 ## Transacciones, acceso y resultados
 
-Cada comando durable sigue `BEGIN IMMEDIATE → leer → autenticar/validar → transformar core → guardar estado/acceso/metadatos → confirmar → proyectar`. El bloqueo excluye escritores independientes durante todo el tramo. Fuera de la coordinación, `save` exige la versión de un objeto cargado; una lectura obsoleta o un objeto transformado sin transacción genera `CONFLICT`. La coordinación síncrona evita intercalaciones dentro del proceso. Trabajo Promise dentro de una transacción se rechaza y revierte. [Semántica transaccional de SQLite](https://www.sqlite.org/lang_transaction.html).
+Cada comando durable sigue `BEGIN IMMEDIATE → leer → autenticar/validar → transformar core → guardar estado/acceso/metadatos → confirmar → proyectar`. El bloqueo excluye escritores independientes durante todo el tramo. Fuera de la coordinación, `save` exige la versión de un objeto cargado; una lectura obsoleta o un objeto transformado sin transacción genera `CONFLICT`. La coordinación síncrona evita intercalaciones dentro del proceso. Callbacks declarados `async` se rechazan antes de invocarlos; resultados Promise/thenable se rechazan y sus continuaciones creadas dentro del ámbito controlado pierden acceso a los adaptadores SQLite/assets mediante AsyncLocalStorage. Tipos `SyncWork` refuerzan transacciones y snapshots. Lanzar una excepción no cancela una Promise: trabajo creado antes del ámbito, casts y acceso directo a JS/SQLite/filesystem quedan fuera de esa protección. Los callbacks de producción son síncronos. [Semántica transaccional de SQLite](https://www.sqlite.org/lang_transaction.html).
 
 Solo se devuelve éxito después de confirmar. Cada transacción con cambios registra un UUID de operación antes de COMMIT. Ante un error se consulta `isTransaction`, se intenta rollback si sigue abierta y se reconcilia el recibo:
 
@@ -44,7 +44,7 @@ Solo se devuelve éxito después de confirmar. Cada transacción con cambios reg
 | Recibo presente | Commit confirmado: devuelve el resultado capturado aunque hubiera excepción posterior |
 | No puede confirmarse rollback/recibo | `COMMIT_UNCERTAIN`; cuarentena de lecturas, escrituras y cleanup hasta cerrar/reabrir |
 
-Nunca se restaura un board antiguo sobre uno confirmado. HTTP comunica incertidumbre con 503 y código; WebSocket envía error y cierra con 1013, sin `result.ok=false` definitivo. Al reiniciar se valida autoridad durable y se reconstruye presencia; se comprueba la mesa antes de repetir. Si queda incierta una creación inicial, su credencial puede no haber llegado al navegador; los hashes no permiten recuperarla como plaintext. El cliente existente no acumula ni reproduce comandos offline. Los recibos no son un log de eventos ni un mecanismo de reenvío; su crecimiento no tiene compactación automática todavía.
+Nunca se restaura un board antiguo sobre uno confirmado. HTTP comunica incertidumbre con 503 y código; WebSocket envía error y cierra con 1013, sin `result.ok=false` definitivo. Al reiniciar se valida autoridad durable y se reconstruye presencia; se comprueba la mesa antes de repetir. Si queda incierta una creación inicial, su credencial puede no haber llegado al navegador; los hashes no permiten recuperarla como plaintext. El cliente existente no acumula ni reproduce comandos offline. Los recibos no son un log de eventos ni un mecanismo de reenvío; se conservan los más recientes hasta `maxCommitReceipts`. Si otro escritor poda un recibo después de COMMIT, su ausencia no demuestra rollback: sin rollback confirmado se informa incertidumbre.
 
 El DM usa SHA-256 de una credencial aleatoria de 256 bits; la comparación conserva tiempo constante. Las identidades de jugador se guardan como hashes ligados uno a uno a IDs públicos. Estado y asociaciones se confirman juntos. La credencial plaintext aparece solo en la respuesta inicial y el navegador que la conserva. Proyecciones usan whitelist del core: ningún hash, credencial, versión de almacenamiento ni asociación privada sale por `state`. El mismo acceso resuelve los mismos IDs tras reiniciar; uno distinto no hereda fichas.
 
@@ -85,12 +85,33 @@ Desconectar cambia presencia y libera sockets; no elimina asignaciones. Cerrar e
 
 Rutas relativas se resuelven desde la raíz donde se ejecuta el comando. SQLite y backups deben quedar fuera del directorio administrado de assets. Variables no entran al core. `npm run dev` inicia backend/Vite con entorno heredado y proxy al puerto `DND_SERVER_PORT` (8787 por defecto); `npm start` usa 8787 y `npm run preview` 4173. `npm start -- --temporary` no requiere datos durables. Reinicia el comando de desarrollo al editar backend.
 
+### Límites de recursos durables
+
+Todos los valores siguientes admiten enteros positivos seguros. Son límites del adaptador Node; el máximo de diez salas activas y las reglas del core permanecen iguales.
+
+| Variable | CLI | Valor por defecto |
+| --- | --- | ---: |
+| `DND_MAX_ROOMS` | `--max-rooms` | 1000 salas persistidas |
+| `DND_MAX_REFERENCED_ASSET_BYTES` | `--max-referenced-asset-bytes` | 1073741824 (1 GiB) |
+| `DND_MAX_ASSET_STORAGE_BYTES` | `--max-asset-storage-bytes` | 1342177280 (1280 MiB) |
+| `DND_MAX_DATABASE_BYTES` | `--max-database-bytes` | 268435456 (256 MiB) |
+| `DND_MAX_WAL_BYTES` | `--max-wal-bytes` | 67108864 (64 MiB) |
+| `DND_MAX_COMMIT_RECEIPTS` | `--max-commit-receipts` | 1024 |
+| `DND_MAX_BACKUP_BYTES` | `--max-backup-bytes` | 2147483648 (2 GiB) |
+
+Se comprueba admisión dentro del bloqueo de escritura antes de crear una sala o preparar un mapa costoso. Los bytes referenciados cuentan cada asset distinto una vez; reemplazar un mapa puede mantener el consumo. La cuota física de assets incluye temporales, huérfanos y archivos desconocidos. La del pool de backups incluye copias completas e incompletas y cuenta conservadoramente cada nombre regular, incluidos hardlinks retenidos de un manifiesto. No borra campañas ni backups para admitir escrituras. Reducir una cuota no elimina datos existentes.
+
+SQLite limita páginas nuevas mediante `max_page_count`; no reduce una base ya mayor. `maxWalBytes` es un umbral previo de admisión: intenta checkpoint/TRUNCATE y rechaza si sigue superado, sin modificar la partida. Una transacción puede sobrepasar el umbral y un lector externo puede impedir el checkpoint. No es una cuota física exacta del volumen ni una reserva contra otros procesos/DB. `wal_autocheckpoint=128` y la poda de recibos reducen el crecimiento normal. FULL/BUSY y límites conservan el estado previo o comunican incertidumbre; no prometen que todo comando existente pueda escribirse con el disco físicamente lleno.
+
+`npm run storage -- status` devuelve contadores, bytes y límites desde una apertura de solo lectura, sin hashes ni asociaciones privadas. Es un comando del operador, no una ruta administrativa HTTP. Ajusta los valores al disco disponible y conserva margen para el sistema, una operación en curso y la restauración a una ubicación nueva.
+
 `.gitignore` excluye `.dnd-data`, `.dnd-backups`, SQLite/WAL/SHM/journal, dependencias, build, reportes y secretos `.env`. Si configuras directorios personalizados, mantenlos fuera del checkout o añade una exclusión local antes de usar Git. Los backups contienen datos de partida y hashes privados; protege sus permisos como los de los datos originales. No hay cifrado ni backups programados.
 
 ## Backup y restauración reales
 
 ```sh
 npm run storage -- backup
+npm run storage -- status
 # También admite --database, --assets-dir, --backup-dir y --data-dir.
 npm run storage -- restore --backup ".dnd-backups/<copia>" --target ".dnd-data/restore-01"
 npm start -- --data-dir ".dnd-data/restore-01"
@@ -112,9 +133,11 @@ El manifiesto incluye identidad de storage, fecha, SHA-256 del archivo SQLite, c
 
 Restore valida formato, checksum, esquema, estado/acceso, referencias, binding y cada archivo antes de crear destino. Exige destino inexistente, padre existente y ubicación fuera de la copia; nunca sustituye datos previos. Copia los bytes de la instantánea **cerrada e inmutable** ya validada, sincroniza, copia mapas con los mismos IDs y verifica origen/destino de nuevo. No es una copia de la DB viva. La lease vacía permite arrancar el servidor restaurado aunque el original siga activo. No reaparecen sockets ni presencia.
 
-`restore-in-progress` bloquea el arranque hasta completar verificación/publicación. Si hay error, conserva el destino incompleto para inspección: usa otro destino nuevo; no quites el marcador para intentar servir datos incompletos. Si falla una sincronización final, inspecciona y valida la ubicación antes de usarla. No edites ni arranques un servidor directamente sobre el bundle: trátalo como artefacto inmutable y restaura a otro lugar.
+Antes de mkdir se escribe y sincroniza `restore-intent-<SHA256 de destino físico>.json` en el padre existente; después se añade `restore-in-progress` en el destino. Ambos bloquean el arranque hasta completar verificación/publicación y cubren también el fallo entre mkdir y apertura del directorio. Comparaciones de contención e identidad usan `realpathSync.native` sobre el ancestro existente y los componentes restantes para reconocer aliases Windows 8.3. ManagedDirectory conserva la ruta original para comprobar symlinks/junctions. Si hay error, conserva destino e intent para inspección: usa otro destino nuevo; no quites marcadores para servir datos incompletos. Si falla una sincronización final, inspecciona y valida la ubicación antes de usarla. No edites ni arranques un servidor directamente sobre el bundle: trátalo como artefacto inmutable y restaura a otro lugar.
 
-## Evidencia y matriz destructiva
+## Evidencia histórica de implementación y matriz destructiva
+
+Los resultados de esta sección pertenecen a la implementación anterior a la auditoría. La [auditoría de B](phase-b-audit.md) registra la línea base repetida, fallos conservados, correcciones y regresión posterior; los 443 históricos no sustituyen esas comprobaciones.
 
 Validación del 2026-10-07 en Windows x64: `npm ci → npm run build → npm test` terminó con código **0**, en **14 min 32 s** (21:15:56 a 21:30:29, UTC−06:00). Instala 32 paquetes; lockfile y dependencias permanecen iguales. TypeScript 7.0.2 y Vite 8.1.5 pasan. Los filtros históricos de perfiles permanecen; entre los casos descubiertos no hay omitidos, cancelados ni reintentos.
 
@@ -157,8 +180,8 @@ El escenario completo DM + dos jugadores atraviesa procesos Node diferentes con 
 
 - **Alta, operacional:** pérdida de credenciales del navegador sigue sin recuperación por cuenta; backup no recupera plaintext. ACL/directorios y copias deben quedar bajo control del operador. Un proceso hostil bajo la misma cuenta Windows no queda aislado por Node; no usar almacenamiento compartido no confiable.
 - **Media:** Linux ARM64, cortes físicos, reinicio real de VM y filesystem de red no ejecutados. Sin garantía absoluta de energía o atomicidad filesystem/SQLite. Un servidor por DB, IO síncrono y bloqueo de backup pueden limitar disponibilidad. PID reutilizado puede requerir inspección de lease.
-- **Media:** `commit_receipts` y salas durables no tienen retención/compactación automática; vigilar espacio y hacer backups manuales. Una corrupción detiene servicio conservadoramente. La API SQLite de Node mínimo sigue en desarrollo activo.
+- **Media:** las cuotas limitan admisión, no constituyen una cuota física total. Un lector externo puede bloquear el mantenimiento de WAL. No hay retención automática de campañas/backups; el operador administra espacio explícitamente. Una corrupción detiene servicio conservadoramente. La API SQLite de Node mínimo sigue en desarrollo activo.
 - **Media, evidencia:** una ejecución Node 22.18 con unidades e integración simultáneas terminó con 26/29 integraciones aprobadas, tres timeouts (HTTP, cierre de proceso, heartbeat), cero omitidas y código 1 en 20.945 s. Repeticiones de integración sin esa carga pasaron; no se identificó un defecto de datos como causa. Se conserva el resultado fallido, sin sustituirlo por una afirmación de estabilidad absoluta.
 - **Baja / fuera de esta validación:** los navegadores móviles están emulados, no probados físicamente. Persisten los límites de seguridad de v0.0.4: mapa completo disponible, niebla visual, sin HTTPS público/hardening nuevo.
 
-No se implementó Cloudflare, Oracle, cuentas, escenas/campañas nuevas, chat, combate, reglas nuevas, jobs ni despliegue. La auditoría independiente de B y cualquier siguiente fase requieren otra tarea.
+No se implementó Cloudflare, Oracle, cuentas, escenas/campañas nuevas, chat, combate, reglas nuevas, jobs ni despliegue. La auditoría de B está documentada; resolver la estabilidad Node 22 y cualquier siguiente fase requiere tratar los pendientes indicados en ella.
