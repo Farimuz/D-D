@@ -24,6 +24,7 @@ export default defineConfig({
     { name: 'iphone', grepInvert: /Android trusted touch/, use: { ...devices['iPhone 13'] } },
   ],
   webServer: {
+    env: { DND_STORAGE_MODE: 'temporary' },
     command: development
       ? 'npm run dev -- --host 127.0.0.1 --port 4173 --strictPort'
       : 'npm run preview -- --host 127.0.0.1 --port 4173 --strictPort',

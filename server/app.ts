@@ -10,6 +10,10 @@ import { CREDENTIAL_PATTERN, MAX_MESSAGE_BYTES, keys, record, validActionMessage
 import type { ServerMessage } from '../src/online/protocol.ts'
 import { Rooms, RoomError } from './rooms.ts'
 import type { Actor, Room } from './rooms.ts'
+import type { RoomStore } from '../src/core/room/store.ts'
+import type { RoomState } from '../src/core/room/types.ts'
+import { CommitUncertainError, PersistenceError } from '../src/infrastructure/node/persistence.ts'
+import type { AssetStore } from '../src/infrastructure/node/persistence.ts'
 
 class HttpError extends Error {
   status: number
@@ -42,18 +46,28 @@ const json = (res: ServerResponse, status: number, data: unknown) => {
 }
 const parseJSON = (s: string) => { try { return JSON.parse(s) as unknown } catch { throw new HttpError(400, 'JSON no válido.') } }
 
-export function createRoomServer(options: { dist?: string; heartbeatMs?: number; joinTimeoutMs?: number } = {}) {
-  const rooms = new Rooms()
+export function createRoomServer(options: { dist?: string; heartbeatMs?: number; joinTimeoutMs?: number; roomStore?: RoomStore; assetStore?: AssetStore } = {}) {
+  const rooms = new Rooms(options.roomStore, options.assetStore)
   const sessions = new Map<WebSocket, { room: Room; actor: Actor }>()
   const alive = new Set<WebSocket>()
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES, perMessageDeflate: false })
   function send(socket: WebSocket, data: ServerMessage) {
     if (socket.readyState !== WebSocket.OPEN) return
     if (socket.bufferedAmount > MAX_MESSAGE_BYTES * 2) { socket.close(1013, 'Conexión demasiado lenta'); return }
-    socket.send(JSON.stringify(data))
+    try { socket.send(JSON.stringify(data)) } catch { socket.terminate() }
   }
-  function broadcast(room: Room) {
-    for (const [socket, session] of sessions) if (session.room === room) send(socket, rooms.snapshot(room, session.actor))
+  function storageError(room?: Room) {
+    for (const [socket, session] of sessions) if (!room || session.room === room) send(socket, {
+      type: 'error', code: 'STORAGE', message: 'No se pudo leer o mantener el estado de la sala. Reintenta cuando el almacenamiento esté disponible.',
+    })
+  }
+  function broadcast(room: Room, confirmed?: RoomState) {
+    // A confirmed mutation is published without another fallible storage read.
+    // Presence-only broadcasts read once, before sending any projected state.
+    try {
+      const state = confirmed ?? rooms.read(room)
+      for (const [socket, session] of sessions) if (session.room === room) send(socket, rooms.snapshot(room, session.actor, state))
+    } catch { storageError(room) }
   }
   async function request(req: IncomingMessage, res: ServerResponse) {
     try {
@@ -70,6 +84,7 @@ export function createRoomServer(options: { dist?: string; heartbeatMs?: number;
       if (mapPath) {
         const room = rooms.get(mapPath[1])
         if (req.method === 'GET' && mapPath[2]) {
+          if (room.board.map?.id !== mapPath[2]) throw new HttpError(404, 'El mapa ya no está disponible.')
           const image = room.image
           if (!image || image.id !== mapPath[2]) throw new HttpError(404, 'El mapa ya no está disponible.')
           res.writeHead(200, { 'Content-Type': image.type, 'Content-Length': image.bytes.length, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
@@ -96,13 +111,11 @@ export function createRoomServer(options: { dist?: string; heartbeatMs?: number;
           if (!matching || !dimensions.width || !dimensions.height || dimensions.width * dimensions.height > MAX_IMAGE_PIXELS) throw new HttpError(400, 'El mapa debe tener como máximo 32 millones de píxeles y dimensiones verificables.')
           const candidate = { ...room.board, map: { ...layout, id: randomUUID() } }
           if (!validShared(candidate)) throw new HttpError(400, 'La posición o escala del mapa no son válidas.')
-          // Commit bytes and metadata together, then broadcast. A failed upload retains both.
-          room.image = { id: candidate.map!.id, bytes, type }
-          room.board = candidate
-          room.revision++
-          room.lastActive = Date.now()
-          broadcast(room)
-          json(res, 200, { map: room.board.map })
+          // Prepare bytes, confirm the reference, then broadcast. SQLite and
+          // filesystem use ordered recovery, not a shared atomic transaction.
+          const committed = rooms.replaceMap(room, { role: 'dm', id: null }, candidate.map, { id: candidate.map.id, bytes, type })
+          broadcast(room, committed)
+          json(res, 200, { map: committed.board.map })
         } finally { room.uploading = false }
         return
       }
@@ -122,7 +135,9 @@ export function createRoomServer(options: { dist?: string; heartbeatMs?: number;
       res.end(req.method === 'HEAD' ? undefined : bytes)
     } catch (error) {
       if (res.destroyed || res.headersSent) return
-      if (error instanceof HttpError) json(res, error.status, { message: error.message })
+      if (error instanceof CommitUncertainError) json(res, 503, { code: 'COMMIT_UNCERTAIN', message: 'No se pudo confirmar el resultado. Comprueba la sala después de reiniciar el servidor antes de repetir la operación.' })
+      else if (error instanceof PersistenceError && error.code.startsWith('RESOURCE_LIMIT_')) json(res, 503, { code: error.code, message: 'El almacenamiento alcanzó su límite. La operación no se confirmó; conserva la partida y solicita espacio al administrador.' })
+      else if (error instanceof HttpError) json(res, error.status, { message: error.message })
       else if (error instanceof RoomError) json(res, error.code === 'ROOM_NOT_FOUND' ? 404 : 409, { message: error.message, code: error.code })
       else json(res, 500, { message: 'No se pudo completar la operación.' })
     }
@@ -146,21 +161,25 @@ export function createRoomServer(options: { dist?: string; heartbeatMs?: number;
         if (!session) {
           if (!validJoin(message)) throw new RoomError('INVALID_MESSAGE', 'La identificación de sala no es válida.')
           const next = rooms.join(message)
-          sessions.set(socket, next)
+          sessions.set(socket, { room: next.room, actor: next.actor })
           clearTimeout(joinTimer)
-          broadcast(next.room)
+          broadcast(next.room, next.state)
           return
         }
         if (!validActionMessage(message)) throw new RoomError('INVALID_MESSAGE', 'La acción no tiene una forma válida.')
         try {
           const result = rooms.apply(session.room, session.actor, message.action)
-          broadcast(session.room)
-          send(socket, { type: 'result', requestId: message.requestId, ok: true, ...result })
+          broadcast(session.room, result.state)
+          send(socket, { type: 'result', requestId: message.requestId, ok: true, ...(result.tokenId ? { tokenId: result.tokenId } : {}) })
         } catch (error) {
-          send(socket, { type: 'result', requestId: message.requestId, ok: false, message: error instanceof RoomError ? error.message : 'No se pudo aplicar la acción.' })
+          if (error instanceof CommitUncertainError) {
+            send(socket, { type: 'error', code: 'COMMIT_UNCERTAIN', message: 'El resultado quedó sin confirmar. Comprueba la sala después de reiniciar el servidor antes de repetir el cambio.' })
+            socket.close(1013, 'Commit sin confirmar')
+          } else send(socket, { type: 'result', requestId: message.requestId, ok: false, message: error instanceof RoomError ? error.message : 'No se pudo aplicar la acción.' })
         }
       } catch (error) {
-        send(socket, { type: 'error', code: error instanceof RoomError ? error.code : 'INVALID_MESSAGE', message: error instanceof RoomError ? error.message : 'Mensaje no válido.' })
+        send(socket, { type: 'error', code: error instanceof RoomError || error instanceof PersistenceError ? error.code : 'INVALID_MESSAGE',
+          message: error instanceof RoomError ? error.message : error instanceof PersistenceError ? 'No se pudo confirmar el acceso. Comprueba la sala cuando el almacenamiento esté disponible.' : 'Mensaje no válido.' })
         if (!sessions.has(socket)) socket.close(1008, 'Identificación rechazada')
       }
     })
@@ -173,7 +192,7 @@ export function createRoomServer(options: { dist?: string; heartbeatMs?: number;
     })
   })
   const timer = setInterval(() => {
-    rooms.sweep()
+    try { rooms.sweep() } catch { storageError() }
     for (const socket of wss.clients) {
       if (!alive.has(socket)) { socket.terminate(); continue }
       alive.delete(socket)
@@ -189,7 +208,7 @@ export function createRoomServer(options: { dist?: string; heartbeatMs?: number;
       await new Promise<void>(accept => wss.close(() => accept()))
       http.closeAllConnections()
       await new Promise<void>(accept => http.close(() => accept()))
-      rooms.rooms.clear()
+      rooms.releaseRuntime()
     },
   }
 }

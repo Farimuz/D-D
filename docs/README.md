@@ -63,3 +63,8 @@ Estas decisiones forman historial. Si una decisión cambia en el futuro, es pref
 ## Arquitectura vigente
 
 - [Arquitectura portable de runtime](architecture/portable-runtime.md): fronteras entre core e infraestructura, persistencia, assets, realtime, concurrencia, migraciones, pruebas y adaptadores Node/Cloudflare.
+- [Auditoría destructiva de v0.0.5-A](architecture/phase-a-audit.md): hallazgos reproducidos, correcciones, evidencia independiente y condiciones para comenzar la persistencia de fase B.
+- [Persistencia de v0.0.5-B](architecture/phase-b-persistence.md): operación SQLite/filesystem, transacciones, identidad, cuotas, reinicios, backup/restauración y límites.
+- [Auditoría destructiva de v0.0.5-B](architecture/phase-b-audit.md): registro histórico de hallazgos, correcciones y regresión fallida; su veredicto `FASE_B_NEEDS_CORRECTION` se conserva y tiene seguimiento fechado.
+- [Investigación de estabilidad B.1](architecture/phase-b1-stability.md): cierre `FASE_B_APPROVED` bajo condiciones documentadas, controles externos, resultados negativos y límites causales.
+- [Auditoría final de v0.0.5](architecture/v0.0.5-final-audit.md): diff integral frente a main, correcciones nuevas, regresión actual y decisión pre-merge; no acredita Oracle ni exposición pública.

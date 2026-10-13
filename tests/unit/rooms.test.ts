@@ -116,7 +116,8 @@ test('only completely idle rooms expire and stale map geometry cannot replace a 
   room.lastActive = 0
   rooms.sweep(31 * 60_000)
   assert.equal(rooms.get(room.id), room)
-  room.board.map = { id: randomUUID(), x: 0, y: 0, width: 100, height: 80, scale: 1 }
+  const map = { id: randomUUID(), x: 0, y: 0, width: 100, height: 80, scale: 1 }
+  rooms.replaceMap(room, dm, map, { id: map.id, bytes: Buffer.from('fixture'), type: 'image/png' })
   assert.throws(() => rooms.apply(room, dm, { type: 'map.update', map: { ...room.board.map!, id: randomUUID() } }), /mapa cambió/)
   for (const member of room.members.values()) { member.connected = false; member.connections = 0 }
   room.dmConnections = 0; room.lastActive = 0
