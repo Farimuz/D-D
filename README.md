@@ -4,6 +4,8 @@ Proyecto para crear una herramienta propia que facilite organizar y jugar partid
 
 La idea es construir una experiencia sencilla de usar tanto en PC como en teléfono, especialmente pensada para reducir el trabajo del Dungeon Master.
 
+**Para retomar el desarrollo desde otra conversación, comienza por el [estado actual del proyecto](docs/PROJECT_STATUS.md).** Este documento distingue implementación real, acuerdos de planificación, asuntos abiertos y próximos pasos propuestos; se complementa con el [índice de documentación](docs/README.md).
+
 **v0.0.5 — Núcleo portable y persistencia Node (fases A + B + B.1)** conserva la mesa local y las salas multijugador de v0.0.4. El DM comparte un enlace o código y los jugadores mueven sus fichas asignadas. SQLite conserva salas y accesos privados; el filesystem conserva los mapas. Reiniciar el servidor con las mismas rutas recupera esos datos. La [auditoría final](docs/architecture/v0.0.5-final-audit.md) recoge las correcciones, regresión actual y evaluación para PR; las auditorías A/B/B.1 conservan sus resultados históricos. No hay cuentas. El paquete conserva la versión 0.0.4 hasta una publicación de versión posterior.
 
 ## Ejecutar
