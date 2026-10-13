@@ -6,6 +6,10 @@ También funciona como la **memoria canónica del proyecto**: aquí deben quedar
 
 El objetivo es que una conversación, una prueba manual o una decisión importante no se pierdan cuando pase el tiempo o cambie la persona/herramienta que trabaje sobre el código.
 
+## Punto de reanudación vigente
+
+- [Estado actual del proyecto y acuerdos de diseño (2026-10-13)](PROJECT_STATUS.md): fuente central para continuar D&D en otra conversación o herramienta. Separa lo implementado, las decisiones acordadas pero pendientes y las cuestiones todavía abiertas; comprobar siempre el HEAD más reciente de main.
+
 ## Qué debe quedar documentado
 
 Cuando sea relevante, el repositorio debe conservar:
