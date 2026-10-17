@@ -8,7 +8,9 @@ El objetivo es que una conversación, una prueba manual o una decisión importan
 
 ## Punto de reanudación vigente
 
-- [Estado actual del proyecto y acuerdos de diseño (2026-10-13)](PROJECT_STATUS.md): fuente central para continuar D&D en otra conversación o herramienta. Separa lo implementado, las decisiones acordadas pero pendientes y las cuestiones todavía abiertas; comprobar siempre el HEAD más reciente de main.
+- [Estado actual del proyecto y acuerdos de diseño (2026-10-17)](PROJECT_STATUS.md): fuente central para continuar D&D en otra conversación o herramienta. Separa lo implementado, lo acordado y las cuestiones abiertas; comprobar siempre el HEAD más reciente de main.
+- [Plan técnico de implementación aprobado](IMPLEMENTATION_PLAN.md): entregas PR 0–9, dependencias, criterios de aceptación, seguridad, migración, riesgos y autorizaciones.
+- [Experiencia provisional jugador/DM](design/PLAYER_DM_UX.md): tablero central, paneles PC/móvil, hoja híbrida, dados globales, controles del DM y pruebas de usabilidad.
 
 ## Qué debe quedar documentado
 
@@ -63,6 +65,7 @@ Estas decisiones forman historial. Si una decisión cambia en el futuro, es pref
 - [0001 — Priorizar juego e integración con mapas externos sobre generación propia](decisions/0001-external-maps-over-built-in-generation.md)
 - [0002 — Visión de D&D como sistema completo, accesible y extensible](decisions/0002-complete-accessible-extensible-game-system.md)
 - [0003 — Núcleo portable con adaptadores de infraestructura](decisions/0003-portable-core-infrastructure-adapters.md)
+- [0004 — Cuentas invitadas, biblioteca y selección libre de personaje](decisions/0004-cuentas-invitaciones-personajes.md)
 
 ## Arquitectura vigente
 

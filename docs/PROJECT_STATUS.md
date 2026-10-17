@@ -1,8 +1,8 @@
 # D&D — Estado vigente y continuidad del proyecto
 
-> **Actualizado:** 2026-10-13  
+> **Actualizado:** 2026-10-17  
 > **Repositorio:** Farimuz/D-D  
-> **Base verificada:** main, commit b1e6c3c1fe7fb738d5808ec4aed0a45539ea3e7f  
+> **Base verificada:** main, commit d5ce9bbd8e72ed823ca0b764960b020d783fdf70 (PR #7 documental; implementación v0.0.5 integrada mediante PR #6).  
 > **Hito técnico integrado:** v0.0.5 (PR #6, merge b1e6c3c). El paquete y el distintivo de UI aún indican 0.0.4; no se ha publicado un release nuevo.  
 > **Situación de producto:** infraestructura de mesa remota y persistencia implementada; herramientas de personajes, dados, lobby y combate **no implementadas**.  
 > **Alcance de este documento:** continuidad y acuerdos de diseño; NO autoriza desarrollo, cambio de versión, merge ni despliegue.
@@ -48,18 +48,22 @@ Objetivo: una sola autoridad sobre estado, permisos, aleatoriedad y guardado. No
 
 ### 3.2 Entrada, identidad, lobby y campañas
 
-- Menú principal sencillo para entrar en partidas y crear/consultar/editar personajes sin necesidad de estar en el tablero.
-- Sala de preparación para que jugadores elijan su personaje, vean la partida y se unan cuando corresponda; el DM dirige la sesión.
-- Los jugadores deben poder preparar sus hojas **aunque el DM no esté conectado**, siempre que el servidor esté disponible, sin modificar el mundo, enemigos ni información privada del DM.
-- Inicialmente se priorizan una campaña y un DM. No se necesitan redes sociales, directorios de amigos, perfiles públicos ni gestión multi-DM.
-- Inicialmente **un personaje participa en una sola campaña**. Se desea reutilizar personajes en varias campañas en el futuro; no implementar ahora sincronización o copias entre campañas.
-- Cada personaje debe tener identidad estable propia y estar asociado a su propietario y campaña, sin confundirse con la ficha/token del mapa.
-- Se necesita una identidad recuperable básica, pero **NO está decidido** si será cuenta sencilla usuario/contraseña, credencial/código de recuperación u otra opción. No asumir login social, correo obligatorio ni recuperación implementada.
-- Diferenciar conceptualmente campaña persistente, sesión (preparación/en curso/finalizada) y encuentro/combate. El mecanismo exacto de transición lo decidirá el diseño posterior.
+**Decisiones aprobadas, todavía sin implementar:**
+
+- Registro **solo por invitación administrativa** de un uso, caducable y revocable. Cuenta con usuario y contraseña, sin correo obligatorio ni login social. Recuperación mediante código temporal de un solo uso emitido por el administrador (inicialmente también DM), sin consultar contraseña previa.
+- **Cuenta independiente de campañas.** El jugador puede registrarse y preparar personajes aunque todavía no haya campaña ni DM conectado, siempre que el servidor esté activo.
+- Las invitaciones de **registro** y de **campaña** son separadas. El menú principal tendrá dos secciones equivalentes: «Mis personajes» y «Mis campañas».
+- Biblioteca personal con **varios personajes** y borradores incompletos con guardado automático. El jugador marca manualmente «Listo» o «En preparación», de modo reversible e informativo, sin campos obligatorios ni bloquear ediciones.
+- Al recibir una invitación de campaña, el jugador la acepta y **elige libremente** su personaje activo, sin aprobación formal del DM. El DM puede ver la elección y conserva control de reglas y mundo.
+- Primera etapa: un DM principal, una campaña activa y **un personaje activo por jugador/campaña**. Cambiar personaje durante una campaña activa y reutilizar simultáneamente el mismo personaje entre campañas se posponen.
+- Separar **cuenta, personaje, participación en campaña, ficha/token, campaña, sesión y encuentro**. Los HP viven en una sola fuente de verdad; borrar una ficha no borra un personaje.
+- No reclamar ni transferir permisos de salas históricas de manera automática al crear cuentas; preservar compatibilidad con salas por código y credencial de navegador.
+
+La motivación y los límites se documentan en [decisión 0004](decisions/0004-cuentas-invitaciones-personajes.md).
 
 ### 3.3 Hojas digitales y progresión manual
 
-Primera etapa: hojas introducidas y editadas **manualmente** a partir de personajes creados por medios externos; no creador completo con clases/reglas automáticas. La hoja debe bastar para consultar la información ordinaria durante la partida.
+Primera etapa: hojas introducidas y editadas **manualmente** a partir de personajes creados por medios externos; no creador completo con clases/reglas automáticas. La creación acepta borradores incompletos con autoguardado; el estado de preparación lo marca el jugador y no impide editar. La hoja debe bastar para consultar la información ordinaria durante la partida.
 
 **Datos centrales deseados:** nombre, raza/especie, clase, nivel, HP máximo/actual/temporal (son tres valores distintos), clase de armadura, seis características (FUE, DES, CON, INT, SAB, CAR), estadísticas de combate, inventario/objetos/cantidades, armas, armaduras y equipo.
 
@@ -73,7 +77,7 @@ Primera etapa: hojas introducidas y editadas **manualmente** a partir de persona
 
 Dos accesos al **mismo motor de dados**:
 
-1. **Lanzador universal, vacío por defecto:** el jugador elige cantidad y tipos de dados (p. ej., 1d20 + 2d4), bonificación entera positiva/negativa y lanza. En la parte inferior hay una **fórmula editable** que también permite empezar escribiendo desde cero. Controles y expresión deben mantenerse sincronizados en ambos sentidos cuando la fórmula sea válida. Mostrar error sin borrar una fórmula parcial/inválida.
+1. **Lanzador universal global, fuera del menú de personaje y vacío por defecto:** el jugador elige cantidad y tipos de dados (p. ej., 1d20 + 2d4), bonificación entera positiva/negativa y lanza. En la parte inferior hay una **fórmula editable** que también permite empezar escribiendo desde cero. Controles y expresión deben mantenerse sincronizados en ambos sentidos cuando la fórmula sea válida. Mostrar error sin borrar una fórmula parcial/inválida.
 2. **Tiradas preconfiguradas:** cada arma/habilidad/hechizo puede tener inicialmente **una configuración guardada** para su tirada habitual, reutilizando el lanzador universal. El jugador puede ajustar la tirada actual sin sobrescribir la configuración guardada.
 
 **Acuerdo de simplicidad:** modificadores y dados adicionales circunstanciales se aplican **solo a una tirada**, sin efectos persistentes automáticos. No implementar inicialmente macros complejas, todas las reglas especiales o animaciones 3D. Una futura animación 3D sería representacional, no generaría el resultado.
@@ -100,29 +104,39 @@ No aplicar automáticamente daño, consumo de recursos o alteraciones de enemigo
 - Pausar/terminar una sesión **no debe eliminar progreso** ni reiniciar por defecto recursos y HP.
 - Backups/recuperación deben extenderse con pruebas cuando aparezcan nuevas entidades.
 
+### 3.7 UX de la mesa aprobada provisionalmente
+
+- **Jugador en PC:** tablero protagonista con panel lateral para resumen de personaje, combate y herramientas; en teléfono, tablero accesible con bandeja/panel inferior adaptable. Exploración y combate comparten interfaz.
+- **DM:** mismo tablero con controles contextuales de escena, mapas/niebla, criaturas, turnos, notas y previsualización de jugador; no desarrollar dos motores.
+- **Dados:** lanzador universal accesible globalmente; tiradas guardadas del personaje abren el mismo lanzador.
+- **Hoja híbrida:** «Resumen» siempre visible; pestañas opcionales de inventario, habilidades, hechizos y notas, ocultables por personaje sin borrar datos. Acciones frecuentes de HP y recursos rápidas; edición estructural por sección; preparación de personaje facilita introducir datos.
+- **HP:** operación de daño o curación por cantidad arbitraria, con HP temporal distinto del actual y máximo.
+- **Validación pendiente:** prototipos visuales aprobados como dirección, **no programados** ni validados en dispositivos reales. Probar bandeja móvil, interacción táctil, densidad del panel, log y accesibilidad.
+
+Véase [especificación de experiencia](design/PLAYER_DM_UX.md).
+
 ## 4. Lo que se pospone expresamente
 
-- Generador de mapas propio (usar imágenes externas).
-- Creador automático completo de personajes, progresión de clases y reglas de 2014/2024 específicas.
-- Motor de hechizos, resistencias/vulnerabilidades y resolución integral de efectos.
-- Creador avanzado de armas, monstruos y contenido casero, aunque el diseño futuro no debe bloquearlo.
-- Reutilización activa de la misma hoja entre campañas y sincronización de progreso entre campañas.
-- Dados 3D, bonificaciones persistentes automáticas y un lenguaje de macros.
-- Funciones de streaming, transmisión o vista especializada de espectadores.
-- Plataforma social, múltiples DM, perfiles complejos y administración avanzada de campañas.
-- Paridad funcional inmediata con modo local en navegador.
+- Generador de mapas propio (usar mapas externos).
+- Creador completo de personajes y automatización exhaustiva de clases, hechizos, efectos, resistencias y reglas 5e 2014/2024.
+- Herramientas avanzadas para crear monstruos, armas o contenido casero; mantener extensibilidad futura.
+- Varios personajes **activos simultáneamente** por jugador/campaña o el mismo personaje en varias campañas simultáneas.
+- Dados 3D, macros y bonificaciones persistentes automáticas.
+- Streaming y vista especializada para espectadores; plataforma social, múltiples DM, administración compleja de campañas.
+- Paridad inmediata de nuevas funciones con la mesa local sin servidor.
+- Chat completo integrado para sustituir la comunicación por voz del grupo; sí mantener notas y registro de actividad.
 
 ## 5. Decisiones abiertas — no fijar unilateralmente
 
-1. **Identidad y recuperación:** modelo de cuentas mínimo, credenciales seguras, cambio de dispositivo, extravío y revocación.
-2. **Modelo campaña/sesión/sala:** relación con RoomState existente, pausas, invitaciones, permisos y posible archivo de campañas terminadas.
-3. **Hoja v1:** campos exactos, controles en móvil, opcionales para personajes sin magia, representación de hechizos/competencias/recursos y límites de contenido.
-4. **Expresiones de dados:** gramática exacta inicial, límites y errores, ventaja/desventaja, tiradas privadas y retención de resultados.
-5. **Avisos y actividad:** qué cambios de hoja notifican al DM y cómo evitar saturación o filtrar secretos.
-6. **Persistencia:** migración con versionado y compatibilidad de esquemas estrictos, transacciones y deduplicación durable; sin pedir al usuario borrar datos existentes.
-7. **Producto:** distribución exacta por releases/PR y criterio de «primera sesión jugable», aún no aprobados como roadmap inmutable.
-8. **Despliegue:** pruebas reales Node/Linux/Oracle ARM64, HTTPS/WSS, autenticación y protección de rutas, backups y aislamiento de otros servicios. No publicar ni tocar Hermes sin autorización.
-9. **Reglas:** 2014 vs 2024 y grado de automatización futura, sin fijar prematuramente.
+1. **Seguridad de cuentas:** contraseñas, sesiones, revocación, CSRF, límites de intentos, recuperación administrativa y parámetros exactos de vencimiento. El **modelo de cuenta por invitación sí está decidido**.
+2. **Campaña/sesión/sala:** integración con el RoomState existente, estados de sesión, invitaciones y permisos; cambio de personaje durante campaña activa y transición de salas heredadas.
+3. **Hoja v1:** campos exactos, límites, hechizos, competencias, recursos y edición en móvil, conservando borradores incompletos y ocultación de pestañas.
+4. **Dados:** gramática exacta inicial, límites, ventaja/desventaja, tiradas públicas/privadas y retención del historial.
+5. **Avisos:** cambios que se notifican al DM durante sesión y cómo evitar saturación y fugas de información.
+6. **Persistencia:** migraciones del esquema SQLite 3, tablas/relaciones, backup y compatibilidad de datos; no obligar a borrar salas existentes.
+7. **Despliegue:** validación Linux/ARM64/Oracle, HTTPS/WSS, protección de rutas y separación de proyectos. **No autorizado**.
+8. **Reglas:** 5e 2014 frente a 2024 y grado posterior de automatización.
+9. **UX pendiente de pruebas:** navegación táctil real, bandeja móvil, densidad de panel, visualización del historial y accesibilidad.
 
 ## 6. Riesgos y contratos que importan
 
@@ -139,15 +153,24 @@ No aplicar automáticamente daño, consumo de recursos o alteraciones de enemigo
 | Acoplar todo a Oracle o Cloudflare | Mantener core portable y adaptadores separados |
 | Despliegue inseguro o interferencia con Hermes | Validar aisladamente y requerir autorización expresa |
 
-## 7. Posible secuencia de trabajo — propuesta, NO roadmap aprobado
+## 7. Plan técnico de implementación — aprobado como orientación
 
-A. Definir identidad mínima, relaciones jugador/personaje/campaña y migraciones.
-B. Construir flujo vertical de lobby sencillo + hoja manual persistente + reconexión/recuperación.
-C. Motor único de dados en servidor, lanzador visual/formulado, tiradas guardadas, log e idempotencia.
-D. HP, recursos, iniciativa, turnos, condiciones y avisos al DM sobre el modelo compartido.
-E. Validación integral: entrar, preparar, jugar, guardar automáticamente, desconectar, reiniciar, retomar y comprobar permisos/privacidad desde PC y teléfono.
+El usuario aprobó el **paso 2** de planificación técnica el 2026-10-17. Orden de entregas previsto:
 
-La UI puede crecer incrementalmente durante estos pasos; no esperar a implementar todo el backend para probar la comodidad. No dar por hecha la denominación v0.0.6 ni comprometer fechas sin revisar el alcance.
+| Entrega | Alcance |
+| --- | --- |
+| PR 0 | Documentación y contratos de producto, UX y plan (único PR expresamente autorizado para crear ahora) |
+| PR 1 | Persistencia y migraciones, sin perder salas existentes |
+| PR 2 | Cuentas por invitación, sesiones seguras y recuperación |
+| PR 3 | Biblioteca y hojas manuales persistentes |
+| PR 4 | Campañas, invitaciones y lobby |
+| PR 5 | Vincular cuenta, personaje, campaña y ficha al tablero |
+| PR 6 | Dados globales autoritativos, historial e idempotencia |
+| PR 7 | HP, recursos, sesión activa y avisos al DM |
+| PR 8 | Encuentros, iniciativa, turnos y notas |
+| PR 9 | UX integrada, regresión, compatibilidad y pruebas completas |
+
+Véase [plan técnico detallado](IMPLEMENTATION_PLAN.md). Es una **secuencia aprobada de planificación**, no autorización anticipada para implementar PR 1–9, fusionar cambios, crear releases o desplegar. Si una entrega crece demasiado, dividirla tras revisar dependencias y riesgos.
 
 ## 8. Criterios para evaluar próximas decisiones
 
