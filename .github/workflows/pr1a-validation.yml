@@ -1,0 +1,50 @@
+name: PR 1-A validation
+on:
+  push:
+    branches:
+      - feat/pr1a-backup-schema-compat
+  pull_request:
+    paths:
+      - "src/infrastructure/node/**"
+      - "tests/**"
+      - ".github/workflows/pr1a-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-validation:
+    name: Node 22.18 build and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout complete repository
+        uses: actions/checkout@v4
+      - name: Install Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+          cache: npm
+      - name: Runtime information
+        run: |
+          node --version
+          npm --version
+          git rev-parse HEAD
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Install browser prerequisites
+        run: npx playwright install --with-deps chromium firefox webkit chrome msedge
+      - name: Build
+        run: npm run build
+      - name: Full test suite
+        run: npm test
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr1a-test-diagnostics
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
