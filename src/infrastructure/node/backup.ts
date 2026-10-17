@@ -3,7 +3,7 @@ import { closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, mkdir
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { SQLiteRoomStore } from './sqlite/roomStore.ts'
-import { SCHEMA_VERSION } from './sqlite/schema.ts'
+import { MIN_RESTORABLE_BACKUP_SCHEMA_VERSION, SCHEMA_VERSION } from './sqlite/schema.ts'
 import { FilesystemAssetStore } from './filesystem/assetStore.ts'
 import { ManagedDirectory } from './filesystem/managedDirectory.ts'
 import { ASSET_ID, validAsset } from './assetMetadata.ts'
@@ -117,7 +117,9 @@ function manifestValue(value: unknown): value is BackupManifest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const v = value as Record<string, unknown>
   if (Object.keys(v).sort().join(',') !== 'assets,createdAt,databaseSha256,format,roomCount,schemaVersion,storageIdentity,version'
-    || v.format !== 'dnd-backup' || v.version !== 1 || v.schemaVersion !== SCHEMA_VERSION
+    || v.format !== 'dnd-backup' || v.version !== 1
+    || !Number.isSafeInteger(v.schemaVersion)
+    || Number(v.schemaVersion) < MIN_RESTORABLE_BACKUP_SCHEMA_VERSION || Number(v.schemaVersion) > SCHEMA_VERSION
     || typeof v.storageIdentity !== 'string' || !ASSET_ID.test(v.storageIdentity)
     || typeof v.createdAt !== 'string' || !Number.isFinite(Date.parse(v.createdAt))
     || typeof v.databaseSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(v.databaseSha256)
@@ -143,14 +145,20 @@ function readManifest(directory: ManagedDirectory): BackupManifest {
 }
 function checkSnapshot(directory: ManagedDirectory, manifest: BackupManifest) {
   if (fileHash(directory, 'rooms.sqlite') !== manifest.databaseSha256) throw new PersistenceError('BACKUP_CHECKSUM', 'unchanged')
+  // Do not trust the manifest's declared schema even when its checksum matches.
+  // Validate against the actual snapshot *without modifying the backup*.
+  const db = new DatabaseSync(directory.file('rooms.sqlite'), { readOnly: true, allowExtension: false })
+  try {
+    const actualVersion = Number(db.prepare('PRAGMA user_version').get()?.user_version)
+    if (actualVersion !== manifest.schemaVersion) throw new PersistenceError('BACKUP_SCHEMA_MISMATCH', 'unchanged')
+    if (db.prepare('SELECT 1 FROM runtime_lease').get()) throw new PersistenceError('BACKUP_RUNTIME', 'unchanged')
+  } finally { db.close() }
   const store = new SQLiteRoomStore(join(directory.path, 'rooms.sqlite'), { readOnly: true })
   let assets: FilesystemAssetStore | undefined
   try {
     if (store.storageIdentity !== manifest.storageIdentity) throw new PersistenceError('BACKUP_IDENTITY', 'unchanged')
     const refs = references(store)
     if (refs.roomCount !== manifest.roomCount || JSON.stringify(refs.assets) !== JSON.stringify(manifest.assets)) throw new PersistenceError('BACKUP_REFERENCES', 'unchanged')
-    const db = new DatabaseSync(directory.file('rooms.sqlite'), { readOnly: true, allowExtension: false })
-    try { if (db.prepare('SELECT 1 FROM runtime_lease').get()) throw new PersistenceError('BACKUP_RUNTIME', 'unchanged') } finally { db.close() }
     assets = new FilesystemAssetStore(join(directory.path, 'assets'), store.storageIdentity, nothing, { readOnly: true })
     for (const meta of refs.assets) assets.read(meta)
   } finally { assets?.close(); store.close() }
