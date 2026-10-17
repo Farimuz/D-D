@@ -28,7 +28,7 @@ No hubo acceso a un checkout completo ni a la instalación de dependencias de la
 
 | Prueba dirigida (entorno reconstruido) | Resultado |
 | --- | --- |
-| `sqliteRoomStore.test.ts` histórico sobre código de persistencia con la modificación actual de esquema | 19/19 aprobadas |
+| `sqliteRoomStore.test.ts` histórico sobre código de persistencia con la modificación actual de esquema, incluida prueba nueva de lectura read-only no migratoria | 20/20 aprobadas |
 | Harness aislado con clases reales de `SQLiteRoomStore`, `FilesystemAssetStore` y `backup.ts`: roundtrip de sala/acceso/imagen; versión incompatible; metadatos de esquema falsos y checksum recompuesto | 3/3 aprobadas |
 | Harness adversarial: restauración interrumpida por inyección, checksum adulterado, verificación de esquema v3 | 3/3 aprobadas |
 | Simulación de bump v3→v4 **sin tablas nuevas**: crear backup v3; incrementar la constante en una copia local; restaurar con binario simulado v4; abrir destino escribible y conservar sala/mapa/acceso, fuente intacta | Aprobada |
