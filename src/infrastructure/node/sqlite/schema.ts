@@ -6,12 +6,18 @@ import { validRoomState } from '../../../core/room/validation.ts'
 import { validAccess } from '../privateAccess.ts'
 import { validAsset } from '../assetMetadata.ts'
 
+// Schema 3 is the first version with complete, self-validating backup metadata.
+// Earlier layouts can be migrated for normal startup but cannot be read as
+// immutable backup snapshots without changing their contents.
+export const MIN_RESTORABLE_BACKUP_SCHEMA_VERSION = 3
 export const SCHEMA_VERSION = 3
 export function initializeSchema(db: DatabaseSync, readOnly: boolean, fault: FaultInjector) {
   const version = Number(db.prepare('PRAGMA user_version').get()!.user_version)
   if (!Number.isInteger(version) || version < 0 || version > SCHEMA_VERSION) throw new PersistenceError('SCHEMA_VERSION', 'unchanged')
-  if (readOnly && version !== SCHEMA_VERSION) throw new PersistenceError('MIGRATION_REQUIRED', 'unchanged')
-  const migrating = version !== SCHEMA_VERSION
+  // Backups of schema 3+ can be inspected without migration. A historical
+  // backup must remain immutable; only a writable server startup migrates it.
+  if (readOnly && version < MIN_RESTORABLE_BACKUP_SCHEMA_VERSION) throw new PersistenceError('MIGRATION_REQUIRED', 'unchanged')
+  const migrating = !readOnly && version !== SCHEMA_VERSION
   try { db.exec(migrating ? 'BEGIN IMMEDIATE' : 'BEGIN') } catch (e) { throw new PersistenceError('BUSY', 'unchanged', e) }
   try {
   if (Number(db.prepare('PRAGMA user_version').get()!.user_version) !== version) throw new PersistenceError('SCHEMA_CHANGED', 'unchanged')

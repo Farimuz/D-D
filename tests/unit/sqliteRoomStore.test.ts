@@ -23,6 +23,22 @@ function fixture(t: TestContext, fault: (point: string) => void = () => {}) {
 const access = () => ({ dmHash: 'a'.repeat(64), identities: [] as Array<{ id: string; identityHash: string }>, lastActive: 123 })
 const corrupt = (error: unknown) => error instanceof PersistenceError && error.code.startsWith('CORRUPT')
 
+test('read-only backup inspection never migrates and refuses unsupported pre-v3 schema', t => {
+  const { store, path, directory } = fixture(t)
+  store.save(initial())
+  const reader = new SQLiteRoomStore(path, { readOnly: true })
+  try { assert.deepEqual(reader.load('ROOM'), initial()) } finally { reader.close() }
+  const check = new DatabaseSync(path, { readOnly: true })
+  try { assert.equal(Number(check.prepare('PRAGMA user_version').get()!.user_version), SCHEMA_VERSION) }
+  finally { check.close() }
+
+  const oldPath = join(directory, 'legacy-read-only.sqlite'), old = new DatabaseSync(oldPath)
+  try { old.exec('PRAGMA user_version=2') } finally { old.close() }
+  const before = readFileSync(oldPath)
+  assert.throws(() => new SQLiteRoomStore(oldPath, { readOnly: true }), /MIGRATION_REQUIRED/)
+  assert.deepEqual(readFileSync(oldPath), before)
+})
+
 test('SQLite persists detached neutral JSON, revisions and explicit deletion across connections', t => {
   const { store, path } = fixture(t), state = initial()
   store.save(state); state.revision = 100
