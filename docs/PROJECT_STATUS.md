@@ -1,8 +1,10 @@
 # D&D — Estado vigente y continuidad del proyecto
 
+> **Continuación más reciente (17-oct-2026):** lee primero [el handoff del PR 1-A](CONTEXT_HANDOFF_2026-10-17.md), que documenta el PR #9 abierto (borrador), CI verde 489 aprobadas/2 omitidas y la revisión independiente pendiente. El documento principal sigue sirviendo para el producto y sus acuerdos; el handoff tiene prioridad para el estado de trabajo actual. **No hay merge de PR #9.**
+
 > **Actualizado:** 2026-10-17  
 > **Repositorio:** Farimuz/D-D  
-> **Base verificada:** main, commit d5ce9bbd8e72ed823ca0b764960b020d783fdf70 (PR #7 documental; implementación v0.0.5 integrada mediante PR #6).  
+> **Base verificada:** main, commit a70014a152a0e763aed6ebdc99a226362b2891ca (PR #8 documental, que completa PR 0; implementación v0.0.5 integrada mediante PR #6).  
 > **Hito técnico integrado:** v0.0.5 (PR #6, merge b1e6c3c). El paquete y el distintivo de UI aún indican 0.0.4; no se ha publicado un release nuevo.  
 > **Situación de producto:** infraestructura de mesa remota y persistencia implementada; herramientas de personajes, dados, lobby y combate **no implementadas**.  
 > **Alcance de este documento:** continuidad y acuerdos de diseño; NO autoriza desarrollo, cambio de versión, merge ni despliegue.
