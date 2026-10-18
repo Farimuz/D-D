@@ -8,6 +8,7 @@ El objetivo es que una conversación, una prueba manual o una decisión importan
 
 ## Punto de reanudación vigente
 
+- **[PUNTO DE REANUDACIÓN ACTUAL (17-oct-2026): PR 1-A auditado técnicamente, CI verde, revisión independiente pendiente](CONTEXT_HANDOFF_2026-10-17.md)**. Este documento resume la situación posterior al PR #8 y enlaza los resultados de GitHub; está en una rama documental, todavía no integrada a `main`.
 - [Estado actual del proyecto y acuerdos de diseño (2026-10-17)](PROJECT_STATUS.md): fuente central para continuar D&D en otra conversación o herramienta. Separa lo implementado, lo acordado y las cuestiones abiertas; comprobar siempre el HEAD más reciente de main.
 - [Plan técnico de implementación aprobado](IMPLEMENTATION_PLAN.md): entregas PR 0–9, dependencias, criterios de aceptación, seguridad, migración, riesgos y autorizaciones.
 - [Experiencia provisional jugador/DM](design/PLAYER_DM_UX.md): tablero central, paneles PC/móvil, hoja híbrida, dados globales, controles del DM y pruebas de usabilidad.

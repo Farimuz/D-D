@@ -1,8 +1,10 @@
 # D&D — Plan técnico de implementación aprobado
 
+> **Estado posterior al plan (17-oct-2026):** PR 0 finalizado con [PR #8](https://github.com/Farimuz/D-D/pull/8); PR 1 se dividió en 1-A/1-B, con [PR #9](https://github.com/Farimuz/D-D/pull/9) (1-A) abierto como borrador, pruebas CI verdes y auditoría independiente pendiente. El estado operativo detallado consta en [el handoff](CONTEXT_HANDOFF_2026-10-17.md). PR 1-B sigue sin iniciar.
+
 **Aprobación de planificación:** 2026-10-17 (paso 2).  
-**Base de referencia:** `main` en `d5ce9bbd8e72ed823ca0b764960b020d783fdf70`; núcleo v0.0.5 de PR #6 y estado documental de PR #7.  
-**PR actual:** PR 0, documentación únicamente. El plan aprobado **no autoriza anticipadamente** codificar PR 1–9, fusionar ramas, publicar una versión o desplegar.  
+**Base de referencia inicial:** `main` en `d5ce9bbd8e72ed823ca0b764960b020d783fdf70`; estado integrado comprobado al corte del handoff: `a70014a152a0e763aed6ebdc99a226362b2891ca` (PR #8).  
+**PR 0:** completado. **PR 1-A:** implementado, CI verde y revisión independiente pendiente; **PR 1-B:** no iniciado. El plan aprobado **no autoriza anticipadamente** codificar PR siguientes, fusionar ramas, publicar una versión o desplegar.  
 **Criterio general:** incrementos verificables, sin romper el modo local ni las salas existentes y sin acoplar el dominio a Node/SQLite/Oracle.
 
 ## 1. Hechos comprobados y límites
