@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import { closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readSync, unlinkSync, writeSync } from 'node:fs'
+import { closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readSync, unlinkSync, writeSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { SQLiteRoomStore } from './sqlite/roomStore.ts'
@@ -33,16 +33,40 @@ function writeFile(directory: ManagedDirectory, name: string, bytes: Uint8Array)
   } finally { closeSync(fd) }
   directory.sync()
 }
-function fileHash(directory: ManagedDirectory, name: string) {
+function noSnapshotSidecars(directory: ManagedDirectory) {
+  for (const suffix of ['-wal', '-shm', '-journal']) {
+    // lstat, rather than existsSync, also detects dangling links. Never open,
+    // checkpoint, remove or otherwise repair an operator-owned backup sidecar.
+    try { lstatSync(directory.file('rooms.sqlite' + suffix)) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error }
+    throw new PersistenceError('BACKUP_NOT_STANDALONE', 'unchanged')
+  }
+}
+function snapshotHash(directory: ManagedDirectory) {
+  noSnapshotSidecars(directory)
+  const name = 'rooms.sqlite'
   const named = directory.regular(name), fd = openSync(directory.file(name), constants.O_RDONLY | noFollow)
   try {
     const before = fstatSync(fd, { bigint: true })
     if (before.dev !== named.dev || before.ino !== named.ino || before.nlink !== 1n) throw new PersistenceError('UNSAFE_FILE', 'unchanged')
+    // SQLite file-format header offsets 18/19 are the write/read versions:
+    // both must be 1 (rollback mode), never 2 (WAL). Check raw bytes before
+    // any SQLite connection can create SHM or interpret an un-hashed WAL.
+    const header = Buffer.alloc(100)
+    let size = 0
+    while (size < header.length) {
+      const count = readSync(fd, header, size, header.length - size, null)
+      if (!count) throw new PersistenceError('BACKUP_NOT_STANDALONE', 'unchanged')
+      size += count
+    }
+    if (!header.subarray(0, 16).equals(Buffer.from('SQLite format 3\0')) || header[18] !== 1 || header[19] !== 1) throw new PersistenceError('BACKUP_NOT_STANDALONE', 'unchanged')
     const hash = createHash('sha256'), bytes = Buffer.alloc(65536)
-    let size = 0, count
+    hash.update(header)
+    let count
     while ((count = readSync(fd, bytes, 0, bytes.length, null))) { hash.update(bytes.subarray(0, count)); size += count }
     const after = fstatSync(fd, { bigint: true })
     if (BigInt(size) !== before.size || after.size !== before.size || after.mtimeNs !== before.mtimeNs) throw new PersistenceError('FILE_CHANGED', 'unchanged')
+    noSnapshotSidecars(directory)
     directory.assert()
     return hash.digest('hex')
   } finally { closeSync(fd) }
@@ -144,24 +168,25 @@ function readManifest(directory: ManagedDirectory): BackupManifest {
   } finally { closeSync(fd) }
 }
 function checkSnapshot(directory: ManagedDirectory, manifest: BackupManifest) {
-  if (fileHash(directory, 'rooms.sqlite') !== manifest.databaseSha256) throw new PersistenceError('BACKUP_CHECKSUM', 'unchanged')
+  if (snapshotHash(directory) !== manifest.databaseSha256) throw new PersistenceError('BACKUP_CHECKSUM', 'unchanged')
   // Do not trust the manifest's declared schema even when its checksum matches.
   // Validate against the actual snapshot *without modifying the backup*.
   const db = new DatabaseSync(directory.file('rooms.sqlite'), { readOnly: true, allowExtension: false })
+  let store: SQLiteRoomStore | undefined, assets: FilesystemAssetStore | undefined
   try {
     const actualVersion = Number(db.prepare('PRAGMA user_version').get()?.user_version)
     if (actualVersion !== manifest.schemaVersion) throw new PersistenceError('BACKUP_SCHEMA_MISMATCH', 'unchanged')
+    const integrity = db.prepare('PRAGMA integrity_check').all()
+    if (integrity.length !== 1 || integrity[0].integrity_check !== 'ok') throw new PersistenceError('CORRUPT_DATABASE', 'unchanged')
+    store = new SQLiteRoomStore(join(directory.path, 'rooms.sqlite'), { readOnly: true })
     if (db.prepare('SELECT 1 FROM runtime_lease').get()) throw new PersistenceError('BACKUP_RUNTIME', 'unchanged')
-  } finally { db.close() }
-  const store = new SQLiteRoomStore(join(directory.path, 'rooms.sqlite'), { readOnly: true })
-  let assets: FilesystemAssetStore | undefined
-  try {
     if (store.storageIdentity !== manifest.storageIdentity) throw new PersistenceError('BACKUP_IDENTITY', 'unchanged')
     const refs = references(store)
     if (refs.roomCount !== manifest.roomCount || JSON.stringify(refs.assets) !== JSON.stringify(manifest.assets)) throw new PersistenceError('BACKUP_REFERENCES', 'unchanged')
     assets = new FilesystemAssetStore(join(directory.path, 'assets'), store.storageIdentity, nothing, { readOnly: true })
     for (const meta of refs.assets) assets.read(meta)
-  } finally { assets?.close(); store.close() }
+  } finally { assets?.close(); store?.close(); db.close() }
+  if (snapshotHash(directory) !== manifest.databaseSha256) throw new PersistenceError('BACKUP_CHECKSUM', 'unchanged')
 }
 
 export async function createBackup(store: SQLiteRoomStore, assetsDirectory: string, backupDirectory: string, fault: FaultInjector = nothing): Promise<string> {
@@ -183,7 +208,7 @@ export async function createBackup(store: SQLiteRoomStore, assetsDirectory: stri
         copies = new FilesystemAssetStore(join(target.path, 'assets'), snapshot.storageIdentity, fault, { limits: store.limits })
         copyAssets(source, copies, refs.assets, fault, 'backup')
         const manifest: BackupManifest = { format: 'dnd-backup', version: 1, schemaVersion: SCHEMA_VERSION,
-          storageIdentity: snapshot.storageIdentity, createdAt: new Date().toISOString(), databaseSha256: fileHash(target, 'rooms.sqlite'), ...refs }
+          storageIdentity: snapshot.storageIdentity, createdAt: new Date().toISOString(), databaseSha256: snapshotHash(target), ...refs }
         checkSnapshot(target, manifest)
         const bytes = Buffer.from(JSON.stringify(manifest, null, 2) + '\n')
         if (bytes.length > 16 * 1024 * 1024) throw new PersistenceError('BACKUP_MANIFEST_LIMIT', 'unchanged')
@@ -232,7 +257,7 @@ export async function restoreBackup(backupDirectory: string, destination: string
     writeFile(target, 'restore-in-progress', Buffer.from('Incomplete restore; server startup is blocked.\n'))
     writeFile(target, 'rooms.sqlite', Buffer.alloc(0))
     fault('restore.snapshot'); copySnapshot(source, target)
-    if (fileHash(target, 'rooms.sqlite') !== manifest.databaseSha256) throw new PersistenceError('BACKUP_CHECKSUM', 'unchanged')
+    if (snapshotHash(target) !== manifest.databaseSha256) throw new PersistenceError('BACKUP_CHECKSUM', 'unchanged')
     // A restore is a new installation. Reusing the backup's binding would let
     // its distinct database claim the original files and clean up its maps.
     // The intent/flag remain until the new DB/assets pair is verified together.
@@ -244,7 +269,7 @@ export async function restoreBackup(backupDirectory: string, destination: string
       copies = new FilesystemAssetStore(join(target.path, 'assets'), storageIdentity, fault)
       copyAssets(original, copies, manifest.assets, fault, 'restore')
     } finally { copies?.close(); original.close() }
-    const restoredManifest = { ...manifest, storageIdentity, databaseSha256: fileHash(target, 'rooms.sqlite') }
+    const restoredManifest = { ...manifest, storageIdentity, databaseSha256: snapshotHash(target) }
     fault('restore.verify'); checkSnapshot(target, restoredManifest)
     // Recheck source too: a backup is an immutable operator-owned artifact.
     checkSnapshot(source, manifest)
