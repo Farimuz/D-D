@@ -1,0 +1,103 @@
+name: PR 1-A validation
+on:
+  push:
+    branches:
+      - feat/pr1a-backup-schema-compat
+  pull_request:
+    paths:
+      - "src/infrastructure/node/**"
+      - "tests/**"
+      - ".github/workflows/pr1a-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-validation:
+    name: Node 22.18 build and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      NO_COLOR: '1'
+      FORCE_COLOR: '0'
+    steps:
+      - name: Checkout complete repository
+        uses: actions/checkout@v4
+      - name: Install Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+          cache: npm
+      - name: Runtime information
+        run: |
+          node --version
+          npm --version
+          git rev-parse HEAD
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Install browser prerequisites
+        run: npx playwright install --with-deps chromium firefox webkit chrome msedge
+      - name: Build
+        run: npm run build
+      - name: Full test suite
+        run: npm test
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr1a-test-diagnostics
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+
+  edge-comparison:
+    name: Edge map regression vs ${{ matrix.label }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: baseline-main
+            ref: a70014a152a0e763aed6ebdc99a226362b2891ca
+          - label: pr1a-implementation
+            ref: 7979971d29631bc565eb33b50041ed97027423b0
+    env:
+      NO_COLOR: "1"
+      FORCE_COLOR: "0"
+    steps:
+      - name: Checkout comparison revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+      - name: Use supported Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+          cache: npm
+      - name: Install exact dependencies
+        run: npm ci
+      - name: Install Edge
+        run: npx playwright install --with-deps msedge
+      - name: Compile
+        run: npm run build
+      - name: Repeat the exact failing scenario twice
+        shell: bash
+        run: |
+          failures=0
+          echo "Revision: $(git rev-parse HEAD)"
+          for i in 1 2; do
+            echo "Edge map adjustment attempt: $i"
+            npx playwright test tests/e2e/map.spec.ts --project=edge --grep 'map adjustment never moves tokens' || failures=$((failures + 1))
+          done
+          echo "FAILURES=$failures"
+          test "$failures" -eq 0
+      - name: Preserve negative evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr1a-edge-${{ matrix.label }}
+          path: test-results/
+          if-no-files-found: ignore

@@ -2,11 +2,12 @@ import test from 'node:test'
 import type { TestContext } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createBackup, restoreBackup } from '../../src/infrastructure/node/backup.ts'
+import { MIN_RESTORABLE_BACKUP_SCHEMA_VERSION, SCHEMA_VERSION } from '../../src/infrastructure/node/sqlite/schema.ts'
 import { SQLiteRoomStore } from '../../src/infrastructure/node/sqlite/roomStore.ts'
 import { FilesystemAssetStore } from '../../src/infrastructure/node/filesystem/assetStore.ts'
 import { Rooms } from '../../server/rooms.ts'
@@ -38,6 +39,39 @@ test('backup includes exactly referenced images, private state and a standalone 
   f.store.releaseRuntime(lease)
   assert.ok(existsSync(join(f.assetPath, f.orphan.id + '.asset')))
 })
+
+test('restore refuses unsupported backup schema manifests without touching source or destination', async t => {
+  const f = fixture(t), backup = await createBackup(f.store, f.assetPath, f.backupPath)
+  const manifestPath = join(backup, 'backup.json'), original = readFileSync(manifestPath)
+  const cases = [MIN_RESTORABLE_BACKUP_SCHEMA_VERSION - 1, SCHEMA_VERSION + 1, 3.5]
+  for (const [index, schemaVersion] of cases.entries()) {
+    writeFileSync(manifestPath, JSON.stringify({ ...JSON.parse(original.toString()), schemaVersion }))
+    const target = join(f.root, 'invalid-schema-' + index)
+    await assert.rejects(restoreBackup(backup, target), /BACKUP_FORMAT/)
+    assert.equal(existsSync(target), false)
+  }
+  writeFileSync(manifestPath, original)
+  assert.deepEqual(readFileSync(manifestPath), original)
+  const restored = await restoreBackup(backup, join(f.root, 'valid-after-rejections'))
+  assert.ok(existsSync(join(restored, 'rooms.sqlite')))
+})
+
+test('restore rejects an internally consistent checksum with a mismatched SQLite schema version', async t => {
+  const f = fixture(t), backup = await createBackup(f.store, f.assetPath, f.backupPath)
+  const manifestPath = join(backup, 'backup.json'), databasePath = join(backup, 'rooms.sqlite')
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  const db = new DatabaseSync(databasePath)
+  try { db.exec('PRAGMA user_version=2') } finally { db.close() }
+  manifest.databaseSha256 = createHash('sha256').update(readFileSync(databasePath)).digest('hex')
+  writeFileSync(manifestPath, JSON.stringify(manifest))
+  const sourceDb = readFileSync(databasePath), sourceManifest = readFileSync(manifestPath)
+  const target = join(f.root, 'mismatched-schema')
+  await assert.rejects(restoreBackup(backup, target), /BACKUP_SCHEMA_MISMATCH/)
+  assert.equal(existsSync(target), false)
+  assert.deepEqual(readFileSync(databasePath), sourceDb)
+  assert.deepEqual(readFileSync(manifestPath), sourceManifest)
+})
+
 test('backup excludes competing writers until all files are copied and never replays them', async t => {
   let f: ReturnType<typeof fixture>, attempted = 0
   f = fixture(t, point => {
